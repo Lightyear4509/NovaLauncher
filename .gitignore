@@ -1,0 +1,15 @@
+.dotnet/
+.dotnet-install.ps1
+.dotnet-cli/
+.packages/
+.vs/
+.idea/
+.obsidian/
+.tools/
+**/bin/
+**/obj/
+TestResults/
+artifacts/
+*.user
+*.suo
+*.log

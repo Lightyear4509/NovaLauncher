@@ -1,0 +1,382 @@
+<Window
+    x:Class="NovaLauncher.App.MainWindow"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:NovaLauncher.App"
+    xmlns:domain="using:NovaLauncher.Domain.Library"
+    xmlns:steam="using:NovaLauncher.Application.Steam"
+    xmlns:achievements="using:NovaLauncher.Domain.Achievements"
+    xmlns:themes="using:NovaLauncher.Application.Themes"
+    xmlns:vm="using:NovaLauncher.Application"
+    x:DataType="vm:MainWindowViewModel"
+    Title="NovaLauncher"
+    Width="1180"
+    Height="760"
+    MinWidth="760"
+    MinHeight="560"
+    AutomationProperties.Name="{x:Static local:ShellAccessibility.MainWindow}"
+    Opened="OnOpened"
+    Closed="OnClosed">
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Border Background="{DynamicResource ThemeSurface}" Padding="20,14">
+      <TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding ProductName}" />
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="190,*">
+      <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,1,1,0" Padding="14,24">
+        <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="8">
+          <TextBlock Text="EXPLORE" FontSize="11" Foreground="{DynamicResource ThemeMuted}" Margin="10,0,0,8" />
+          <Button Grid.Row="1" Content="{DynamicResource NavHome}" HorizontalContentAlignment="Left" Click="OnShowHome" AutomationProperties.Name="Open Home page" />
+          <Button Grid.Row="2" Content="{DynamicResource NavLibrary}" HorizontalContentAlignment="Left" Click="OnShowLibrary" AutomationProperties.Name="Open Library page" />
+          <StackPanel Grid.Row="4" Spacing="8">
+            <Button Content="{DynamicResource NavSaves}" HorizontalContentAlignment="Left" Click="OnShowSaves" AutomationProperties.Name="Open Saves page" />
+            <Button Content="{DynamicResource NavSettings}" HorizontalContentAlignment="Left" Click="OnShowSettings" AutomationProperties.Name="Open Settings and Diagnostics page" />
+            <Border Background="{DynamicResource ThemeElevated}" CornerRadius="10" Padding="12">
+              <StackPanel>
+                <TextBlock Text="Local-first" FontWeight="SemiBold" />
+                <TextBlock Text="No telemetry or background sync" FontSize="11" Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <ScrollViewer Grid.Column="1" IsVisible="{Binding Workspace.IsLibraryPage}">
+        <Grid Margin="30" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="20">
+          <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+            <StackPanel>
+              <TextBlock Text="Library" FontSize="34" FontWeight="Bold" />
+              <TextBlock Text="Installed games on this device" Foreground="{DynamicResource ThemeMuted}" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="Add installed game" Click="OnPickGameExecutable" AutomationProperties.Name="Choose an installed game executable" />
+            <Button Grid.Column="2" Content="Import Steam games" Click="OnPreviewSteamImport" AutomationProperties.Name="Preview Steam library import" />
+          </Grid>
+          <TextBlock Grid.Row="1" Text="No games yet. Add an installed .exe or import your Steam library." IsVisible="{Binding Workspace.IsEmpty}" AutomationProperties.Name="Empty library message" />
+          <ItemsControl Grid.Row="2" ItemsSource="{Binding Workspace.Games}" AutomationProperties.Name="Game card library">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="210" ItemHeight="330" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="domain:LibraryItem">
+                <Button Width="194" Height="314" Margin="8" Padding="0" Click="OnOpenGameDetails" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Open game details">
+                  <Grid RowDefinitions="230,*">
+                    <Border Background="{DynamicResource ThemeElevated}" CornerRadius="12,12,0,0" ClipToBounds="True">
+                      <Grid>
+                        <TextBlock Text="{Binding Name}" TextWrapping="Wrap" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16" />
+                        <Image Stretch="UniformToFill" Loaded="OnCardArtworkLoaded" Unloaded="OnCardArtworkUnloaded" RenderOptions.BitmapInterpolationMode="HighQuality" AutomationProperties.Name="Game cover artwork" />
+                      </Grid>
+                    </Border>
+                    <StackPanel Grid.Row="1" Margin="14,10" Spacing="3">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding Platform}" Foreground="{DynamicResource ThemeMuted}" />
+                      <TextBlock Text="{Binding Source}" FontSize="11" Foreground="{DynamicResource ThemeAccent}" />
+                    </StackPanel>
+                  </Grid>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Border Grid.Row="2" Background="{DynamicResource ThemeSurface}" CornerRadius="16" Padding="20" Width="520" HorizontalAlignment="Right" VerticalAlignment="Top" IsVisible="{Binding Workspace.IsEditorVisible}">
+            <StackPanel Spacing="10">
+              <TextBlock Text="Add installed game" FontSize="22" FontWeight="Bold" />
+              <TextBox Text="{Binding Workspace.Name}" PlaceholderText="Game name" AutomationProperties.Name="Game name" />
+              <TextBox Text="{Binding Workspace.Target}" PlaceholderText="Selected executable" IsReadOnly="True" AutomationProperties.Name="Game launch target" />
+              <TextBox Text="{Binding Workspace.Platform}" PlaceholderText="Platform" AutomationProperties.Name="Game platform" />
+              <Button Content="Save game" Click="OnSaveGame" AutomationProperties.Name="Save manual game" />
+            </StackPanel>
+          </Border>
+          <Border Grid.Row="3" Background="{DynamicResource ThemeSurface}" CornerRadius="16" Padding="20" IsVisible="{Binding Workspace.HasSteamPreview}">
+            <StackPanel Spacing="10">
+              <TextBlock Text="Steam import preview" FontSize="22" FontWeight="Bold" />
+              <TextBlock Text="Review the detected items and skipped manifests. NovaLauncher never writes to Steam files." TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding Workspace.SteamPreviewItems}" AutomationProperties.Name="Steam import preview">
+                <ItemsControl.ItemTemplate><DataTemplate x:DataType="steam:SteamImportPreviewItem"><TextBlock Text="{Binding Name}" /></DataTemplate></ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <ItemsControl ItemsSource="{Binding Workspace.SteamImportFailures}" AutomationProperties.Name="Skipped Steam manifests">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="steam:SteamImportFailure">
+                    <StackPanel Margin="0,4"><TextBlock Text="{Binding Path}" FontWeight="SemiBold" TextWrapping="Wrap" /><TextBlock Text="{Binding Reason}" Foreground="{DynamicResource ThemeAccent}" TextWrapping="Wrap" /></StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Button Content="Import reviewed games" Click="OnCommitSteamImport" HorizontalAlignment="Left" AutomationProperties.Name="Import reviewed Steam preview" />
+            </StackPanel>
+          </Border>
+        </Grid>
+      </ScrollViewer>
+
+      <ScrollViewer Grid.Column="1" IsVisible="{Binding Workspace.IsGameDetailsPage}">
+        <StackPanel Margin="30" Spacing="18">
+          <Button Content="← Back to Library" Click="OnShowLibrary" HorizontalAlignment="Left" AutomationProperties.Name="Back to Library" />
+          <Border Height="300" Background="{DynamicResource ThemeElevated}" CornerRadius="18" ClipToBounds="True">
+            <Grid>
+              <Image x:Name="SelectedCover" Stretch="UniformToFill" AutomationProperties.Name="Selected game artwork" />
+              <Border VerticalAlignment="Bottom" Background="#D008101F" Padding="24,18"><TextBlock Text="{Binding Workspace.SelectedGame.Name}" FontSize="32" FontWeight="Bold" /></Border>
+            </Grid>
+          </Border>
+          <Grid ColumnDefinitions="2*,*" ColumnSpacing="28">
+            <StackPanel Spacing="14">
+              <WrapPanel ItemSpacing="10">
+                <Button Content="Play" Click="OnLaunch" AutomationProperties.Name="Launch selected game" />
+                <Button Content="Refresh metadata" Click="OnRefreshMetadata" AutomationProperties.Name="Refresh selected game metadata and artwork" />
+                <Button Content="Add cover" Click="OnAddManualCover" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Choose custom cover for manual game" />
+                <Button Content="Remove cover" Click="OnRemoveManualCover" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Remove custom cover from manual game" />
+                <Button Content="Favorite" Click="OnToggleFavorite" AutomationProperties.Name="Toggle selected game favorite" />
+                <Button Content="Edit" Click="OnEditSelectedGame" AutomationProperties.Name="Edit selected game" />
+              </WrapPanel>
+              <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="12" Padding="16">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="Cross-device saves" FontSize="18" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Workspace.SelectedSaveDirectory}" TextWrapping="Wrap" />
+                  <TextBlock Text="Manual games only. Steam titles continue to use Steam Cloud." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+                  <TextBlock Text="Shared save identity" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Workspace.SelectedSaveSyncIdentity}" TextWrapping="Wrap" />
+                  <TextBox Text="{Binding Workspace.SaveSyncLabel}" PlaceholderText="Same game label on both devices" AutomationProperties.Name="Automatic shared save label" />
+                  <Button Content="Link automatically with paired device" Click="OnLinkSaveAutomatically" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" HorizontalAlignment="Left" AutomationProperties.Name="Derive shared save identity from paired credential" />
+                  <TextBlock Text="Use the same label and platform on both devices. The private identity is derived independently; neither computer must be accessed at the same time." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+                  <TextBlock Text="Advanced recovery link" FontWeight="SemiBold" Margin="0,6,0,0" />
+                  <TextBox Text="{Binding Workspace.SaveSyncLinkCode}" PlaceholderText="Shared save identity from the matching game" AutomationProperties.Name="Shared game save identity" />
+                  <WrapPanel ItemSpacing="8">
+                    <Button Content="Create link" Click="OnGenerateSaveSyncLink" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Create shared save identity for selected game" />
+                    <Button Content="Copy link" Click="OnCopySaveSyncLink" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Copy shared save identity" />
+                    <Button Content="Paste link" Click="OnPasteSaveSyncLink" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Paste shared save identity" />
+                    <Button Content="Apply link" Click="OnApplySaveSyncLink" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Apply shared save identity to selected game" />
+                  </WrapPanel>
+                  <WrapPanel ItemSpacing="8">
+                    <Button Content="Choose save folder" Click="OnChooseSaveFolder" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Choose manual game save folder" />
+                    <Button Content="Remove save mapping" Click="OnClearSaveFolder" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Remove manual game save folder mapping" />
+                    <Button Content="Sync now" Click="OnSyncSelectedGameNow" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Upload selected game saves now" />
+                  </WrapPanel>
+                  <Border IsVisible="{Binding Workspace.ShowInitialSaveUploadPrompt}" Background="#4A3A1C" BorderBrush="#E5B64A" BorderThickness="1" CornerRadius="8" Padding="12" AutomationProperties.Name="Existing save upload confirmation">
+                    <StackPanel Spacing="8">
+                      <TextBlock Text="Existing files were found in this save folder. Upload them to the paired device now? Confirm that this is the correct game's save folder." TextWrapping="Wrap" />
+                      <WrapPanel ItemSpacing="8">
+                        <Button Content="Upload existing saves" Click="OnSyncSelectedGameNow" AutomationProperties.Name="Confirm upload of existing save files" />
+                        <Button Content="Not now" Click="OnDismissInitialSaveUpload" AutomationProperties.Name="Decline upload of existing save files" />
+                      </WrapPanel>
+                    </StackPanel>
+                  </Border>
+                  <TextBlock Text="Conflict recovery" FontWeight="SemiBold" />
+                  <WrapPanel ItemSpacing="8">
+                    <Button Content="Keep local" Click="OnKeepLocalSave" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Resolve save conflict by keeping local files" />
+                    <Button Content="Use remote" Click="OnKeepRemoteSave" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Resolve save conflict by restoring remote files" />
+                    <Button Content="Keep both" Click="OnKeepBothSaves" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Resolve save conflict by retaining both versions" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+              <TextBlock Text="About" FontSize="22" FontWeight="Bold" />
+              <TextBlock Text="{Binding Workspace.SelectedGameDescription}" TextWrapping="Wrap" FontSize="15" />
+              <TextBlock Text="Achievements" FontSize="22" FontWeight="Bold" Margin="0,12,0,0" />
+              <Button Content="Refresh achievements" Click="OnRefreshAchievements" HorizontalAlignment="Left" />
+              <ItemsControl ItemsSource="{Binding Workspace.Achievements}" />
+            </StackPanel>
+            <Border Grid.Column="1" Background="{DynamicResource ThemeSurface}" CornerRadius="16" Padding="20">
+              <StackPanel Spacing="12">
+                <TextBlock Text="Game details" FontSize="22" FontWeight="Bold" />
+                <TextBlock Text="Developer" Foreground="{DynamicResource ThemeMuted}" /><TextBlock Text="{Binding Workspace.SelectedGameDevelopers}" TextWrapping="Wrap" />
+                <TextBlock Text="Publisher" Foreground="{DynamicResource ThemeMuted}" /><TextBlock Text="{Binding Workspace.SelectedGamePublishers}" TextWrapping="Wrap" />
+                <TextBlock Text="Released" Foreground="{DynamicResource ThemeMuted}" /><TextBlock Text="{Binding Workspace.SelectedGameReleaseDate}" />
+                <TextBlock Text="Playtime" Foreground="{DynamicResource ThemeMuted}" /><TextBlock Text="{Binding Workspace.SelectedGamePlayTime}" FontSize="18" FontWeight="SemiBold" />
+                <CheckBox Content="Run this game as administrator" IsChecked="{Binding Workspace.RunSelectedAsAdministrator}" IsEnabled="{Binding Workspace.CanRunAsAdministrator}" AutomationProperties.Name="Request administrator permission for this game" />
+                <TextBlock Text="Windows will show a UAC approval prompt. NovaLauncher never bypasses UAC." FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+                <Button Content="Remove from NovaLauncher" Click="OnRemove" AutomationProperties.Name="Remove selected game from NovaLauncher" />
+              </StackPanel>
+            </Border>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer Grid.Column="1" IsVisible="{Binding Workspace.IsHomePage}">
+        <StackPanel Margin="34,30" Spacing="22">
+          <StackPanel>
+            <TextBlock Text="Welcome home" FontSize="34" FontWeight="Bold" />
+            <TextBlock Text="Your games, favorites, and recent additions in one calm place." FontSize="16" Foreground="{DynamicResource ThemeMuted}" />
+          </StackPanel>
+          <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="6">
+                <TextBlock Text="Recently played" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Text="Not tracked. NovaLauncher does not monitor playtime or game processes." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+              </StackPanel>
+              <Button Grid.Column="1" Content="Browse library" Click="OnShowLibrary" AutomationProperties.Name="Browse complete game library" />
+            </Grid>
+          </Border>
+          <TextBlock Text="Favorites and recent additions" FontSize="22" FontWeight="SemiBold" />
+          <ItemsControl ItemsSource="{Binding Workspace.HomeGames}" AutomationProperties.Name="Home game highlights">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><WrapPanel ItemWidth="220" ItemHeight="270" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="domain:LibraryItem">
+                <Button Width="206" Height="256" Padding="0" Margin="0,0,14,14" Click="OnOpenGameDetails" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Open highlighted game details">
+                  <Grid RowDefinitions="190,*">
+                    <Border Background="{DynamicResource ThemeElevated}" CornerRadius="14,14,0,0" ClipToBounds="True">
+                      <Grid>
+                        <TextBlock Text="{Binding Name}" FontWeight="Bold" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="14" />
+                        <Image Stretch="UniformToFill" Loaded="OnCardArtworkLoaded" Unloaded="OnCardArtworkUnloaded" RenderOptions.BitmapInterpolationMode="HighQuality" AutomationProperties.Name="Highlighted game cover artwork" />
+                      </Grid>
+                    </Border>
+                    <StackPanel Grid.Row="1" Margin="14,8" VerticalAlignment="Bottom">
+                    <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Platform}" Foreground="{DynamicResource ThemeMuted}" />
+                    <TextBlock Text="{Binding Source}" FontSize="11" Foreground="{DynamicResource ThemeAccent}" />
+                    </StackPanel>
+                  </Grid>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Text="No games yet? Open Library to import Steam or add an installed game." IsVisible="{Binding Workspace.IsEmpty}" Foreground="{DynamicResource ThemeMuted}" />
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer Grid.Column="1" IsVisible="{Binding Workspace.IsSavesPage}">
+        <StackPanel Margin="34,30" Spacing="20" MaxWidth="820" HorizontalAlignment="Left">
+          <TextBlock Text="Downloads &amp; Saves" FontSize="34" FontWeight="Bold" />
+          <TextBlock Text="Track encrypted cross-device save downloads and uploads. Full-game transfer is not enabled in this build." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+          <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">
+            <StackPanel Spacing="10">
+              <TextBlock Text="Current transfer" FontSize="21" FontWeight="SemiBold" />
+              <ProgressBar IsIndeterminate="True" IsVisible="{Binding Workspace.IsSaveTransferActive}" Height="8" AutomationProperties.Name="Current save transfer progress" />
+              <TextBlock Text="{Binding Workspace.ActiveSaveTransfer}" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+          <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="16" Padding="24">
+            <StackPanel Spacing="12">
+              <TextBlock Text="Transfer history" FontSize="21" FontWeight="SemiBold" />
+              <ItemsControl ItemsSource="{Binding Workspace.SaveSyncActivities}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,0,0,1" Padding="0,10">
+                      <Grid ColumnDefinitions="2*,*,Auto" ColumnSpacing="12">
+                        <StackPanel><TextBlock Text="{Binding GameName}" FontWeight="SemiBold" /><TextBlock Text="{Binding SnapshotId}" FontSize="11" Foreground="{DynamicResource ThemeMuted}" /></StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding Status}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="{Binding FileCount, StringFormat='{}{0} files'}" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <WrapPanel ItemSpacing="8">
+                <Button Content="Retry queued uploads" Click="OnRetryPendingSaveUploads" AutomationProperties.Name="Retry queued save uploads to paired device" />
+                <Button Content="Refresh activity" Click="OnRefreshSaveSyncActivity" AutomationProperties.Name="Refresh save transfer activity" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+          <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">
+            <StackPanel Spacing="12">
+              <TextBlock Text="Local NovaLauncher backup" FontSize="21" FontWeight="SemiBold" />
+              <TextBlock Text="Export or validate a backup of your library, collections, settings, and manual overrides. Disposable caches and secrets are excluded." TextWrapping="Wrap" />
+              <TextBox Text="{Binding Workspace.BackupPath}" PlaceholderText="C:\Backups\NovaLauncher.zip" AutomationProperties.Name="Saves page backup archive path" />
+              <WrapPanel ItemSpacing="8">
+                <Button Content="Export local backup" Click="OnExport" AutomationProperties.Name="Export local NovaLauncher backup from Saves page" />
+                <Button Content="{Binding Workspace.RestoreButtonText}" Click="OnRestore" AutomationProperties.Name="Restore local NovaLauncher backup from Saves page" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+          <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="16" Padding="24">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="6">
+                <TextBlock Text="Cross-device save linking" FontSize="21" FontWeight="SemiBold" />
+                <TextBlock Text="Available experimentally for explicitly mapped manual games after both NovaLauncher devices are paired over Tailscale. Conflicts block launch rather than overwriting either save." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+              </StackPanel>
+              <Button Grid.Column="1" Content="Configure in Settings" Click="OnShowSettings" AutomationProperties.Name="Configure cross-device save linking" />
+            </Grid>
+          </Border>
+          <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="12" Padding="16">
+            <TextBlock Text="Before restoring a verified peer snapshot, NovaLauncher creates a local versioned backup. Steam games are never handled by this feature." TextWrapping="Wrap" />
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer Grid.Column="1" IsVisible="{Binding Workspace.IsSettingsPage}">
+        <StackPanel Margin="34,30" Spacing="20" MaxWidth="760" HorizontalAlignment="Left">
+          <TextBlock Text="Settings &amp; Diagnostics" FontSize="34" FontWeight="Bold" />
+          <TextBlock Text="Appearance and local health information. Diagnostics remain on this device." Foreground="{DynamicResource ThemeMuted}" />
+          <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="16" Padding="24">
+            <StackPanel Spacing="12">
+              <TextBlock Text="Appearance" FontSize="21" FontWeight="SemiBold" />
+              <ComboBox
+                  ItemsSource="{Binding Workspace.ThemeOptions}"
+                  SelectedValue="{Binding Workspace.SelectedThemeId}"
+                  SelectedValueBinding="{Binding Id}"
+                  AutomationProperties.Name="Built-in color theme">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="themes:ThemeOption"><TextBlock Text="{Binding DisplayName}" /></DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <Button Content="Apply theme" Click="OnApplyTheme" AutomationProperties.Name="Apply selected built-in theme" />
+              <TextBlock Text="Five trusted built-in themes are available. Downloaded/community themes are not loaded." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+            </StackPanel>
+          </Border>
+          <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="16" Padding="24">
+            <StackPanel Spacing="10">
+              <TextBlock Text="SteamGridDB artwork" FontSize="21" FontWeight="SemiBold" />
+              <TextBlock Text="Paste your SteamGridDB API key to enable optional cover-art lookup. The key is held only for this running session and is never logged or written into library backups." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+              <TextBox PasswordChar="●" Text="{Binding Workspace.SteamGridDbApiKey}" PlaceholderText="SteamGridDB API key" AutomationProperties.Name="SteamGridDB API key" />
+              <Button Content="Apply API key" Click="OnApplySteamGridDbKey" HorizontalAlignment="Left" AutomationProperties.Name="Apply SteamGridDB API key for this session" />
+              <TextBlock Text="{Binding Workspace.SteamGridDbKeyStatus}" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+          <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="16" Padding="24">
+            <StackPanel Spacing="10">
+              <TextBlock Text="Tailscale save-sync foundation" FontSize="21" FontWeight="SemiBold" />
+              <TextBlock Text="On both devices, enter and save the other device's Tailscale IP. Generate the code on one device, keep NovaLauncher open there, then accept the code on the second device." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+              <TextBlock Text="{Binding Workspace.SaveSyncIdentity}" TextWrapping="Wrap" AutomationProperties.Name="Stable NovaLauncher device identity" />
+              <TextBox Text="{Binding Workspace.TailscalePeerAddress}" PlaceholderText="100.64.x.x or fd7a:115c:a1e0::…" AutomationProperties.Name="Tailscale peer IP address" />
+              <Button Content="Validate and save peer" Click="OnSaveTailscalePeer" HorizontalAlignment="Left" AutomationProperties.Name="Validate and save Tailscale peer address" />
+              <Button Content="Retry network listener" Click="OnRetrySaveSyncListener" HorizontalAlignment="Left" AutomationProperties.Name="Retry Tailscale save-sync network listener" />
+              <Border IsVisible="{Binding Workspace.IsSaveSyncListening}" Background="#183D2C" BorderBrush="#4EC98A" BorderThickness="1" CornerRadius="8" Padding="10">
+                <TextBlock Text="{Binding Workspace.SaveSyncListenerStatus, StringFormat='NETWORK READY · {0}'}" TextWrapping="Wrap" AutomationProperties.Name="Save sync listener ready" />
+              </Border>
+              <Border IsVisible="{Binding Workspace.IsSaveSyncNotListening}" Background="#4A2424" BorderBrush="#E56565" BorderThickness="1" CornerRadius="8" Padding="10">
+                <TextBlock Text="{Binding Workspace.SaveSyncListenerStatus, StringFormat='NETWORK NOT READY · {0}'}" TextWrapping="Wrap" AutomationProperties.Name="Save sync listener inactive" />
+              </Border>
+              <Border IsVisible="{Binding Workspace.IsSaveSyncPaired}" Background="#263F73" BorderBrush="#5B8DEF" BorderThickness="2" CornerRadius="10" Padding="12" AutomationProperties.Name="Save sync paired status">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="PAIRED" FontSize="18" FontWeight="Bold" />
+                  <TextBlock Text="{Binding Workspace.SaveSyncPairingStatus}" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+              <Border IsVisible="{Binding Workspace.IsSaveSyncNotPaired}" Background="#4A2E1E" BorderBrush="#E59A45" BorderThickness="2" CornerRadius="10" Padding="12" AutomationProperties.Name="Save sync not paired status">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="NOT PAIRED" FontSize="18" FontWeight="Bold" />
+                  <TextBlock Text="{Binding Workspace.SaveSyncPairingStatus}" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+              <TextBlock Text="{Binding Workspace.SaveSyncPairingFeedback}" TextWrapping="Wrap" AutomationProperties.Name="Save sync pairing result" />
+              <TextBox PasswordChar="●" Text="{Binding Workspace.PairingCode}" PlaceholderText="123 456" AutomationProperties.Name="NovaLauncher 24-hour device invitation" />
+              <WrapPanel ItemSpacing="8">
+                <Button Content="Generate 24-hour invitation" Click="OnGeneratePairingCode" AutomationProperties.Name="Generate a single-use 24-hour save-sync invitation" />
+                <Button Content="Copy code" Click="OnCopyInvitationCode" AutomationProperties.Name="Copy six-digit invitation code" />
+                <Button Content="Paste code" Click="OnPasteInvitationCode" AutomationProperties.Name="Paste six-digit invitation code" />
+                <Button Content="Accept invitation" Click="OnApplyPairingCode" IsEnabled="{Binding Workspace.CanAcceptPairingInvitation}" AutomationProperties.Name="Accept save-sync invitation from trusted device" />
+                <Button Content="Refresh pairing status" Click="OnRefreshPairingStatus" AutomationProperties.Name="Refresh save-sync pairing status" />
+                <Button Content="Revoke paired device" Click="OnRevokePairedDevice" AutomationProperties.Name="Revoke the paired save-sync device" />
+              </WrapPanel>
+              <TextBlock Text="Accept invitation becomes available after the other device's Tailscale IP is entered and the invitation field contains six digits." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+              <TextBlock Text="Steam-imported games are excluded and continue to use Steam Cloud where supported." TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+          <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">
+            <StackPanel Spacing="8">
+              <TextBlock Text="Local diagnostics" FontSize="21" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding Version, StringFormat='NovaLauncher version: {0}'}" />
+              <TextBlock Text="{Binding Workspace.Games.Count, StringFormat='Visible library items: {0}'}" />
+              <TextBlock Text="{Binding Workspace.AchievementSummary, StringFormat='Achievements: {0}'}" TextWrapping="Wrap" />
+              <TextBlock Text="Network activity occurs only when you explicitly import or refresh provider data." TextWrapping="Wrap" />
+              <TextBlock Text="Logs are structured and local; API keys and raw configured account IDs are not logged." TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+
+    <Border Grid.Row="2" Background="{DynamicResource ThemeSurface}" Padding="20,12">
+      <TextBlock
+          Text="{Binding Workspace.Status}"
+          TextWrapping="Wrap"
+          AutomationProperties.Name="NovaLauncher operation status"
+          AutomationProperties.LiveSetting="Polite" />
+    </Border>
+  </Grid>
+</Window>

@@ -1,0 +1,12 @@
+NOVALAUNCHER UNSIGNED ALPHA PREVIEW
+
+This build is not digitally signed. Windows may show "Unknown publisher",
+Microsoft Defender SmartScreen may show "Windows protected your PC", and Smart
+App Control or organization policy may block it.
+
+Download only from the official NovaLauncher GitHub release. Before running,
+compare the file's SHA-256 value with SHA256SUMS.txt in the same release. Do not
+disable system-wide security protections to install NovaLauncher.
+
+This alpha is local-first. Cross-device game-save synchronization, downloads,
+automatic updates, and cloud accounts are not implemented.

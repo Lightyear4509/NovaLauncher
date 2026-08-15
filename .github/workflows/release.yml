@@ -1,0 +1,51 @@
+name: Build unsigned alpha artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      AVALONIA_TELEMETRY_OPTOUT: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.302
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Restore locked dependencies
+        run: dotnet restore NovaLauncher.sln --locked-mode
+      - name: Verify, build, and test
+        shell: pwsh
+        run: |
+          dotnet format NovaLauncher.sln --verify-no-changes --no-restore --severity warn
+          dotnet build NovaLauncher.sln -c Release --no-restore
+          dotnet test NovaLauncher.sln -c Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults/Release
+          dotnet list NovaLauncher.sln package --vulnerable --include-transitive
+      - name: Install pinned signed Inno Setup compiler
+        shell: pwsh
+        run: |
+          $uri = 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe'
+          Invoke-WebRequest $uri -OutFile inno.exe
+          $signature = Get-AuthenticodeSignature inno.exe
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B\.V\.') { throw 'Invalid Inno Setup signature.' }
+          $dir = Join-Path $PWD '.tools\InnoSetup'
+          & .\inno.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER "/DIR=$dir"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$dir\ISCC.exe")) { throw 'Inno Setup installation failed.' }
+      - name: Build installer, portable ZIP, SBOM, and checksums
+        shell: pwsh
+        run: .\eng\Build-Release.ps1
+      - name: Upload unsigned release candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: NovaLauncher-unsigned-alpha
+          path: artifacts/release/*
+          if-no-files-found: error

@@ -1,0 +1,21 @@
+namespace NovaLauncher.Domain.Library;
+
+public sealed record LibraryItem(
+    GameId Id,
+    string Name,
+    string Platform,
+    string Source,
+    LaunchTarget LaunchTarget,
+    GameMetadata Metadata,
+    bool IsFavorite,
+    DateTimeOffset AddedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    string? SourceItemId = null,
+    string? ImportedName = null,
+    GameArtwork? Artwork = null,
+    TimeSpan TotalPlayTime = default,
+    DateTimeOffset? LastPlayedAtUtc = null,
+    bool RunAsAdministrator = false,
+    string? SaveDirectory = null,
+    Guid? SaveSyncId = null,
+    string? SaveSyncLabel = null);

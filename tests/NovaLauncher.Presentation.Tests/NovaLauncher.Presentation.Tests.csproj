@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+    <PackageReference Include="coverlet.collector" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\NovaLauncher.App\NovaLauncher.App.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\src\NovaLauncher.App\App.axaml.cs" Link="App.axaml.cs" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\NovaLauncher.App\MainWindow.axaml" Link="MainWindow.axaml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

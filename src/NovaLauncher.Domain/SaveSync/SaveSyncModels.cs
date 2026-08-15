@@ -1,0 +1,41 @@
+using NovaLauncher.Domain.Library;
+
+namespace NovaLauncher.Domain.SaveSync;
+
+public sealed record SaveFileEntry(string RelativePath, long Length, string Sha256);
+
+public sealed record SaveSnapshotManifest(
+    Guid SnapshotId,
+    Guid? ParentSnapshotId,
+    GameId GameId,
+    Guid DeviceId,
+    DateTimeOffset CreatedAtUtc,
+    IReadOnlyList<SaveFileEntry> Files,
+    IReadOnlyList<string> DeletedPaths);
+
+public sealed record SaveSyncGameState(
+    GameId GameId,
+    Guid? HeadSnapshotId,
+    IReadOnlyList<SaveFileEntry> LastObservedFiles,
+    string Status,
+    string? ConflictSnapshotId = null);
+
+public sealed record SaveSyncSettings(
+    Guid DeviceId,
+    string DeviceName,
+    string? PeerAddress,
+    Guid? PeerDeviceId,
+    int Port,
+    IReadOnlyList<SaveSyncGameState> Games,
+    Guid? PendingInvitationId = null,
+    DateTimeOffset? PendingInvitationExpiresAtUtc = null,
+    Guid? LastConsumedInvitationId = null,
+    string? PendingCodeSalt = null,
+    string? PendingCodeHash = null,
+    int PendingCodeFailedAttempts = 0)
+{
+    public const int DefaultPort = 47471;
+
+    public static SaveSyncSettings CreateDefault() =>
+        new(Guid.NewGuid(), Environment.MachineName, null, null, DefaultPort, []);
+}

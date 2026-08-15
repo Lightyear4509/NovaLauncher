@@ -1,0 +1,47 @@
+<Application
+    x:Class="NovaLauncher.App.App"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Application.Resources>
+    <SolidColorBrush x:Key="ThemeBackground" Color="#0B1020" />
+    <SolidColorBrush x:Key="ThemeSurface" Color="#111831" />
+    <SolidColorBrush x:Key="ThemeElevated" Color="#172448" />
+    <SolidColorBrush x:Key="ThemeBorder" Color="#253760" />
+    <SolidColorBrush x:Key="ThemeText" Color="#F7F8FC" />
+    <SolidColorBrush x:Key="ThemeMuted" Color="#B8C1DF" />
+    <SolidColorBrush x:Key="ThemeAccent" Color="#63D8FF" />
+    <SolidColorBrush x:Key="ThemeButton" Color="#253760" />
+    <SolidColorBrush x:Key="ThemeButtonHover" Color="#36558C" />
+    <SolidColorBrush x:Key="ThemeButtonPressed" Color="#182A50" />
+    <x:String x:Key="NavHome">⌂  _Home</x:String>
+    <x:String x:Key="NavLibrary">▦  _Library</x:String>
+    <x:String x:Key="NavSaves">⇅  _Saves</x:String>
+    <x:String x:Key="NavSettings">⚙  Se_ttings</x:String>
+  </Application.Resources>
+  <Application.Styles>
+    <FluentTheme DensityStyle="Compact" />
+    <Style Selector="Window">
+      <Setter Property="Background" Value="{DynamicResource ThemeBackground}" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
+      <Setter Property="FontFamily" Value="avares://Avalonia.Fonts.Inter/Assets#Inter" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="MinHeight" Value="40" />
+      <Setter Property="Padding" Value="18,8" />
+      <Setter Property="Background" Value="{DynamicResource ThemeButton}" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="Transitions">
+        <Transitions><BrushTransition Property="Background" Duration="0:0:0.14" /></Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ThemeButtonHover}" />
+    </Style>
+    <Style Selector="Button:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ThemeButtonPressed}" />
+    </Style>
+  </Application.Styles>
+</Application>
