@@ -1,12 +1,23 @@
-param([string]$Configuration = 'Release')
+param(
+    [string]$Configuration = 'Release',
+    [string]$DotNetPath
+)
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$dotnet = Join-Path $root '.dotnet\dotnet.exe'
+$dotnet = if ([string]::IsNullOrWhiteSpace($DotNetPath)) {
+    Join-Path $root '.dotnet\dotnet.exe'
+} else {
+    $DotNetPath
+}
 $publish = Join-Path $root 'artifacts\publish\win-x64'
 $release = Join-Path $root 'artifacts\release'
 $iscc = Join-Path $root '.tools\InnoSetup\ISCC.exe'
-if (-not (Test-Path $dotnet)) { throw 'Pinned local .NET SDK is missing.' }
+if (-not (Test-Path $dotnet -PathType Leaf)) { throw "Pinned .NET SDK is missing at: $dotnet" }
+$dotnetVersion = (& $dotnet --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $dotnetVersion -ne '10.0.302') {
+    throw "Expected .NET SDK 10.0.302, but found '$dotnetVersion'."
+}
 if (-not (Test-Path $iscc)) { throw 'Verified Inno Setup compiler is missing.' }
 
 foreach ($generatedPath in @($publish, $release)) {

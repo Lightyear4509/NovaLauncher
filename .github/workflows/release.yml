@@ -52,7 +52,7 @@ jobs:
           }
       - name: Build installer, portable ZIP, SBOM, and checksums
         shell: pwsh
-        run: .\eng\Build-Release.ps1
+        run: .\eng\Build-Release.ps1 -DotNetPath (Get-Command dotnet).Source
       - name: Upload unsigned release candidates
         uses: actions/upload-artifact@v4
         with:
