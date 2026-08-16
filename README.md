@@ -1,103 +1,196 @@
 # NovaLauncher
 
-NovaLauncher is a planned Windows desktop game-library launcher that unifies
-user-owned games without replacing their official launchers.
+NovaLauncher is a local-first Windows game launcher for organizing and launching games you already have installed. It brings manually installed games and an existing Steam library into one visual interface while leaving ownership, installation, updates, multiplayer, DRM, and platform services with their original providers.
 
-## Repository status
+The launcher includes a Steam-inspired Home page, a card-based Library, individual game-detail pages, cover artwork, playtime tracking, read-only achievements, local backup and restore, themes, and experimental encrypted save synchronization between trusted Windows devices over Tailscale.
 
-This repository contains the Increment 0 Avalonia/.NET foundation, Increment 1
-durable storage, Increment 2 local manual-library experience, and Increment 3
-defensive Steam import. The Windows UI
-supports first-run recovery, manual add/edit/remove, search, deterministic sorts,
-favorites, collections, safe executable or allowlisted-launcher-URI starting, and
-validated backup/restore. It is **not** a feature-complete or distributable
-launcher. Packaging, the planned navigation redesign, and full release
-qualification remain later increments. Increment 4 supplies first-party
-metadata/artwork providers, deterministic merge and cache behavior, bounded
-image validation, managed cache installation/cleanup, offline placeholders, and
-safe visual artwork rendering.
-Increment 5 adds opt-in, first-party, read-only Steam achievements with stable
-identities, bounded documented API calls, atomic local caching, stale/offline
-fallback, completion summaries, and explicit privacy states.
-Increment 6 adds independently branded Home, Library, Saves, and Settings
-navigation. Increment 7 adds five trusted themes, diagnostics, compact-layout
-hardening, localization boundaries, accessibility contracts, and performance
-gates. Increment 8 now produces an unsigned installer, portable ZIP, SBOM, and
-checksums under `artifacts/release`. These are alpha preview candidates, not a
-qualified public release: the clean Windows 10/11 installer matrix and manual
-NVDA/Narrator/200%-scale checks remain open.
+NovaLauncher does **not** download games or ROMs, bypass DRM, replace Steam, provide cracked multiplayer compatibility, execute downloaded code, or upload telemetry. Steam games still launch through Steam and continue to use Steam Cloud and Steam's online services.
 
-Plugins, plugin SDKs, marketplaces, scripting, and downloaded-code execution
-have been removed from the active product plan. Achievements are planned as a
-first-party, read-only integration after Steam identity and metadata are in
-place; see [[Product/Features/Achievements|Achievements]]. Historical plugin
-notes are retained only as non-authoritative research records.
+## Download NovaLauncher
 
-Historical increment reports describe an older implementation that is still
-absent and cannot be independently verified from this checkout. They are not
-evidence for the new source foundation.
+Download the latest build from [GitHub Releases](https://github.com/Lightyear4509/NovaLauncher/releases). For most users, choose:
 
-Do not advertise this checkout as release-ready until every gate in
-[[Planning/Releases/Release Readiness Checklist|Release Readiness Checklist]]
-passes and installable artifacts are attached to a release.
+- `NovaLauncher-Setup-0.1.0-alpha.1-win-x64.exe` for the Windows installer.
+- `NovaLauncher-0.1.0-alpha.1-win-x64-portable.zip` if you prefer a portable copy.
 
-## Try the alpha preview
+This alpha is currently **unsigned**. Windows may display **Unknown publisher** or a Microsoft Defender SmartScreen warning. Download `SHA256SUMS.txt` from the same release and verify the installer before opening it:
 
-Use `artifacts/release/NovaLauncher-Setup-0.1.0-alpha.1-win-x64.exe`, or extract
-the portable ZIP beside it and run `NovaLauncher.App.exe`. Both are unsigned;
-verify the SHA-256 value in `SHA256SUMS.txt` before running them. Windows may
-show **Unknown publisher** or a Microsoft Defender SmartScreen warning. Do not
-disable security protections globally. See `docs/operations/install-uninstall.md`.
+```powershell
+Get-FileHash .\NovaLauncher-Setup-0.1.0-alpha.1-win-x64.exe -Algorithm SHA256
+```
 
-An experimental post-alpha Tailscale save-sync implementation is now present for
-explicitly mapped **manual games only**. It uses stable device identity, a
-single-use 24-hour six-digit invitations with three-attempt lockout, backed by a separate 256-bit secret stored in Windows Credential Manager, authenticated
-encryption above Tailscale, immutable hash manifests, changed-file deltas,
-offline retry, quiet-period checks, atomic backup-before-restore, replay
-rejection, and explicit conflict choices. Steam-imported games are hard-excluded
-and continue to use Steam Cloud. This remains a preview until the real two-device
-tailnet, interruption, Windows Firewall, and recovery matrices are completed.
+Compare the complete result with the installer entry in `SHA256SUMS.txt`. Do not run the file if the values differ, and do not disable Windows security protections globally.
 
-The latest post-Increment-8 preview adds a card-based Library page, separate
-game details, executable file picking, directly measured local-executable
-playtime, explicit per-game UAC launch requests, clearer Steam import failures,
-and a memory-only SteamGridDB API-key setting. See
-`docs/releases/0.1.0-alpha.1-ui-library-redesign.md` for boundaries.
+## Install and start
 
-The subsequent Steam-import identity fix repairs staged JSON round-tripping and
-has been verified against an isolated copy of the local library plus read-only
-Steam manifests. Name-based manual-game enrichment is designed but remains a
-separate confirmation-first increment; see
-`docs/roadmap/manual-game-identity-and-enrichment.md`.
+### Installer
 
-The current UI workspace adds aspect-preserving cover art to Library and Home,
-manual-game-only Add Cover and Remove Cover actions, and opaque themed buttons
-with animated hover color feedback. Custom images are decoded, bounded, copied
-atomically into managed artwork storage, and never modify the chosen source file.
+1. Download the setup executable and checksum file from the release page.
+2. Verify the checksum as described above.
+3. Run the installer. NovaLauncher installs for the current Windows user and does not require administrator access.
+4. Open **NovaLauncher** from the Start menu or desktop shortcut.
 
-## Build handoff
+### Portable version
 
-Use these documents as the canonical handoff for Google AI Studio or another
-implementation agent:
+1. Download and extract the portable ZIP into a new folder.
+2. Keep all extracted files together.
+3. Run `NovaLauncher.App.exe`.
+4. Delete that extracted folder when you no longer want the portable application. This does not delete your installed games.
 
-1. [[AI/Google AI Studio Build Guide|Google AI Studio Build Guide]]
-2. [[Product/Requirements/Alpha Release Specification|Alpha Release Specification]]
-3. [[Engineering/Architecture/Technical Architecture Specification|Technical Architecture Specification]]
-4. [[Engineering/Quality/Safety and Test Plan|Safety and Test Plan]]
-5. [[Planning/Releases/Release Readiness Checklist|Release Readiness Checklist]]
+## Navigate the launcher
 
-The build agent must implement in small, compiling increments. A feature is not
-complete merely because code was generated: its tests, recovery behavior,
-documentation, and release gate must also pass.
+The left navigation rail contains four primary pages:
 
-## Intended technology
+- **Home** shows recently played and highlighted games for quick access.
+- **Library** displays all manually added and Steam-imported games as cover cards.
+- **Downloads & Saves** shows save-sync activity, conflicts, pending transfers, peer acknowledgements, snapshots, and local backup controls.
+- **Settings** contains themes, diagnostics, optional SteamGridDB configuration, and trusted-device pairing.
 
-- Windows 10/11 desktop application
-- C# and the latest supported stable .NET LTS at implementation time
-- Avalonia UI with MVVM and dependency injection
-- Local, offline-first, versioned JSON persistence for the alpha
-- xUnit (or an equivalent .NET test runner) for unit and integration tests
-- Self-contained `win-x64` release artifact
+Select any game card to open its details page. From there you can launch the game, inspect its metadata and playtime, manage its cover, refresh supported achievements, and configure save synchronization for eligible manual games.
 
-The implementation agent must pin exact SDK and package versions in generated
-source control and record them in the release notes.
+## Add a manually installed game
+
+1. Open **Library**.
+2. Select **Add installed game**.
+3. Use the Windows file picker to locate and select the game's `.exe` file.
+4. Review the name and executable information, then save the entry.
+5. Select the new card to open its game-details page.
+
+NovaLauncher stores a reference to the selected executable; it does not copy, move, modify, or upload the game. Launches normally use the current user's permissions. If a particular game genuinely requires administrator privileges, enable the explicit elevated-launch option for that game. Windows will still show its User Account Control confirmation—NovaLauncher does not silently bypass UAC.
+
+Measured playtime is recorded while a directly launched local game process is running. Launcher-mediated or unusual child-process behavior can make some titles report playtime differently.
+
+## Import an existing Steam library
+
+1. Make sure Steam is installed and its library folders are accessible.
+2. Open **Library** and select **Import Steam games**.
+3. Review the dry-run preview. NovaLauncher lists discoverable entries and reports individual items it cannot safely import.
+4. Confirm the preview to merge the accepted games into your library.
+
+Steam discovery is read-only. NovaLauncher reads library metadata and manifests needed for discovery, but never reads Steam credentials or modifies Steam files. Imported games retain stable Steam identities and launch through Steam, so Steam remains responsible for licensing, updates, achievements, multiplayer, overlays, and Steam Cloud.
+
+If discovery reports that the Steam root has no `steamapps` directory, confirm that the selected folder is the actual Steam installation root rather than a particular game's folder. Additional Steam library locations must remain connected and readable.
+
+## Use cover artwork and game details
+
+Open a game's details page to view its artwork, description, publisher information, release information, playtime, and supported achievements.
+
+For a manually added game:
+
+1. Select **Add cover**.
+2. Choose an image from your computer.
+3. NovaLauncher validates and copies the image into its managed local artwork storage.
+4. Select **Remove cover** to return to the placeholder without changing the original image.
+
+Artwork is displayed with aspect-preserving scaling so covers fit Library and Home cards without stretching. In **Settings**, an optional SteamGridDB API key can enable supported artwork lookup. The key is retained only for the current running session and is not written to the library, logs, or backups.
+
+Metadata and artwork from online services may be incomplete or may not match similarly named games. Review suggested matches before accepting them.
+
+## View achievements
+
+Supported first-party achievement information is read-only. Open a game-details page and select **Refresh achievements** to update available completion information. Availability depends on a stable supported game identity and the upstream provider. NovaLauncher does not unlock, modify, or fabricate achievements.
+
+## Synchronize manual-game saves with Tailscale
+
+Save sync is experimental and applies only to manually added games with a save folder you explicitly select. Steam-imported games are excluded and continue to use Steam Cloud.
+
+Before starting, install Tailscale on both Windows devices, sign both into the same tailnet, and confirm that they can reach each other. Do not expose NovaLauncher's TCP port `47471` through a public router.
+
+### Pair two trusted devices
+
+1. Install the same NovaLauncher version on both devices.
+2. Open **Settings** on each device and enter the other device's Tailscale IP address.
+3. On the first device, select **Generate 24-hour invitation**.
+4. Transfer the displayed six-digit code through a trusted channel. You can use **Copy code** on the first device and **Paste code** on the second, or type it manually.
+5. On the second device, select **Accept invitation** within 24 hours.
+6. Confirm that Settings displays **PAIRED** and the expected pinned device identity. On the invitation-generating device, select **Refresh pairing status** after acceptance.
+
+The invitation is single-use and locks after three failed attempts. The six-digit code is only a short-lived authorization step; it is not the encryption key. NovaLauncher creates a separate random 256-bit secret and stores it in Windows Credential Manager. Previously paired devices reconnect automatically until you select **Revoke paired device**.
+
+### Map and link a game's save folder
+
+1. Add the same manual game on both devices.
+2. Open the game's details page on each device.
+3. Use the same sync label and platform on both entries.
+4. Select **Choose save folder** and choose the exact folder where that game stores its saves.
+5. Select **Link automatically with paired device**.
+6. If an existing folder contains saves, review the prompt and choose **Upload existing saves** only after verifying the game and folder. You can choose **Not now** and use **Sync now** later.
+
+Before launching a mapped game, NovaLauncher checks for a newer save generation from the paired device. After the launched game process exits—even when you close it from inside the game—NovaLauncher waits for stable file scans and sends changed files. The other device can restore those files before its next launch. **Downloads & Saves** displays transfer progress, queued retries, snapshot state, and peer acknowledgement.
+
+If both devices changed the same baseline, NovaLauncher blocks automatic replacement and presents explicit choices:
+
+- **Keep local** retains the saves on the current device.
+- **Use remote** restores the peer's version after creating a managed backup.
+- **Keep both** preserves both versions for manual inspection.
+
+Keep independent backups of valuable saves. The alpha has safeguards for authenticated encryption, replay rejection, immutable manifests, atomic replacement, backup-before-restore, cancellation, offline retry, and conflicts, but it has not been qualified across every game, firewall, interruption, disk-full, sleep, or power-loss scenario.
+
+## Back up or restore NovaLauncher data
+
+Open **Downloads & Saves**, choose a destination archive path, and select **Export local backup**. Use **Restore local NovaLauncher backup** to validate and restore a compatible archive.
+
+This backup protects NovaLauncher's library and supported local application data; it is not a substitute for backing up installed game folders or every game's save data. Restoring a backup never installs a game.
+
+## Customize appearance and inspect diagnostics
+
+Open **Settings** to choose one of the included themes. Buttons retain visible themed backgrounds and hover feedback across supported themes. Diagnostics and structured logs are stored locally and are designed to exclude API keys, pairing secrets, and raw configured account identifiers.
+
+When reporting a problem, include the NovaLauncher version, the action that failed, and a sanitized diagnostic message. Never post pairing codes, Tailnet IP addresses, API keys, save contents, or other private data in a public GitHub issue.
+
+## Troubleshooting
+
+### The application process starts but no window appears
+
+Install the newest alpha build or try the portable package in a clean folder. If the problem continues, collect the local diagnostic message and open a GitHub issue with your Windows version and display configuration.
+
+### A game requires elevated permissions
+
+Open that game's details and enable its explicit elevated-launch option only if the game is trusted and actually requires it. Approve the Windows UAC prompt when launching. Avoid running NovaLauncher itself permanently as administrator.
+
+### Steam import finds no games
+
+Confirm Steam is installed, the detected root contains `steamapps`, and external library drives are connected. Steam manifests must be readable. NovaLauncher will not modify a damaged manifest to make discovery succeed.
+
+### Pairing is network-ready but does not connect
+
+Confirm both devices are online in the same tailnet, each is configured with the other device's Tailscale IP, and Windows Firewall permits NovaLauncher on the Tailscale network. Generate a fresh invitation if the previous code expired or was consumed. Do not forward port `47471` on an internet-facing router.
+
+### Save sync reports no new snapshot
+
+Verify that the game is manual rather than Steam-imported, both entries use the same sync label and platform, both devices are paired, and the exact save folders are mapped. On the device that already has saves, choose **Sync now** or **Upload existing saves**, then check **Downloads & Saves** for a peer acknowledgement or queued retry.
+
+## Privacy and security boundaries
+
+NovaLauncher is local-first:
+
+- No telemetry is collected.
+- No hosted NovaLauncher cloud service receives your library or saves.
+- Steam credentials are never read.
+- Steam files are never modified.
+- Pairing secrets are kept out of JSON, logs, exports, and release artifacts.
+- Online metadata and artwork requests occur only for configured supported providers.
+- Save synchronization is limited to folders you explicitly map and peers you explicitly pair.
+- Plugins, scripting, marketplaces, ROM acquisition, and downloaded-code execution are not supported.
+
+## Current release status
+
+`v0.1.0-alpha.1` is a usable public preview, not a production-qualified release. The installer is unsigned, and real-device coverage is still incomplete for some Windows configurations, accessibility combinations such as Narrator/NVDA at 200% scaling, network interruptions, firewall policies, and save-recovery edge cases.
+
+Please use test data or maintain independent backups while evaluating experimental save synchronization.
+
+## Uninstall
+
+Remove the installed application through **Windows Settings → Apps → Installed apps**. Uninstalling removes application files but intentionally does not delete installed games or NovaLauncher's separate user-library data. For the portable build, close NovaLauncher and delete the extracted application folder.
+
+## Contributing and development
+
+NovaLauncher is licensed under the [MIT License](LICENSE). Development documentation, architecture decisions, safety requirements, tests, and release gates remain available in this repository for contributors:
+
+- [Google AI Studio Build Guide](AI/Google%20AI%20Studio%20Build%20Guide.md)
+- [Alpha Release Specification](Product/Requirements/Alpha%20Release%20Specification.md)
+- [Technical Architecture Specification](Engineering/Architecture/Technical%20Architecture%20Specification.md)
+- [Safety and Test Plan](Engineering/Quality/Safety%20and%20Test%20Plan.md)
+- [Release Readiness Checklist](Planning/Releases/Release%20Readiness%20Checklist.md)
+
+The application uses pinned .NET and package versions. Changes should preserve its safety boundaries, pass formatting and analyzers, build in Debug and Release, and pass the complete automated test suite without weakening safeguards.
