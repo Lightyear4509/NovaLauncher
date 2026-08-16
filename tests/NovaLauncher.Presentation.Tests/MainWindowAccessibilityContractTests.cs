@@ -18,8 +18,8 @@ public sealed class MainWindowAccessibilityContractTests
             Path.Combine(AppContext.BaseDirectory, "MainWindow.axaml"),
             CancellationToken.None);
 
-        Assert.DoesNotContain("AutomationProperties.Name=\"Search library\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("AutomationProperties.Name=\"Library sort order\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Search library\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Library sort order\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Choose an installed game executable\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Game card library\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Open game details\"", xaml, StringComparison.Ordinal);

@@ -198,6 +198,10 @@ public sealed class DocumentPolicyTests
             "100",
             policy.Validate(new SettingsDocument(1, LauncherSettings.Default with { ThemeId = new string('x', 101) })),
             StringComparison.Ordinal);
+        Assert.Contains(
+            "Library view",
+            policy.Validate(new SettingsDocument(1, LauncherSettings.Default with { LibraryViewMode = "downloaded-view" })),
+            StringComparison.OrdinalIgnoreCase);
         Assert.Null(policy.Validate(SettingsDocument.Default));
     }
 

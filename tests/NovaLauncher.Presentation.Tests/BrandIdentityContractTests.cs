@@ -96,6 +96,38 @@ public sealed class BrandIdentityContractTests
         Assert.Equal(7, reader.ReadUInt16());
     }
 
+    [Fact]
+    public async Task PhaseTwoHomeUsesHonestLocalDashboardStates()
+    {
+        var xaml = await ReadAsync("MainWindow.axaml");
+
+        Assert.Contains("AutomationProperties.Name=\"Launch featured game\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Recently played games\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Most played games\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Workspace.TotalLibraryPlayTime", xaml, StringComparison.Ordinal);
+        Assert.Contains("directly monitored local executable sessions", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Not tracked. NovaLauncher does not monitor playtime", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PhaseTwoLibraryExposesLocalFiltersAndResponsiveViewControls()
+    {
+        var xaml = await ReadAsync("MainWindow.axaml");
+
+        Assert.Contains("AutomationProperties.Name=\"Search library\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Filter library by source\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Filter library by platform\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Filter library by target availability\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Library sort order\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Show library as grid\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Show library as list\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Library card size\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Missing game target warning\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Filter library by collection\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Clear library collection filter\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Locate replacement executable for selected manual game\"", xaml, StringComparison.Ordinal);
+    }
+
     private static Task<string> ReadAsync(string fileName) =>
         File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, fileName), CancellationToken.None);
 }

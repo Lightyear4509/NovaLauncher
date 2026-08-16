@@ -228,6 +228,211 @@ public sealed class LibraryWorkspaceViewModelTests
     }
 
     [Fact]
+    public async Task HomeDashboardExposesLocalStatisticsAndDeterministicFeaturedGame()
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.Workspace.InitializeAsync(CancellationToken.None);
+        fixture.Workspace.Name = "Nova One";
+        fixture.Workspace.Platform = "Windows";
+        fixture.Workspace.Target = "C:\\Games\\NovaOne.exe";
+        await fixture.Workspace.SaveDraftAsync(CancellationToken.None);
+        await fixture.Workspace.ToggleFavoriteAsync(CancellationToken.None);
+
+        Assert.Equal(1, fixture.Workspace.LibraryGameCount);
+        Assert.Equal(1, fixture.Workspace.FavoriteGameCount);
+        Assert.Equal("0 minutes", fixture.Workspace.TotalLibraryPlayTime);
+        Assert.True(fixture.Workspace.HasFeaturedGame);
+        Assert.Equal("Nova One", fixture.Workspace.FeaturedGame!.Name);
+        Assert.Empty(fixture.Workspace.ContinuePlayingGames);
+        Assert.Empty(fixture.Workspace.MostPlayedGames);
+    }
+
+    [Fact]
+    public async Task LibraryFiltersViewModesAndCardSizesAreDeterministic()
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.Workspace.InitializeAsync(CancellationToken.None);
+        fixture.Workspace.Name = "Manual Game";
+        fixture.Workspace.Platform = "Windows";
+        fixture.Workspace.Target = "C:\\Games\\Missing.exe";
+        await fixture.Workspace.SaveDraftAsync(CancellationToken.None);
+        fixture.SteamSource.Result = new SteamCatalogScanResult(
+            [new SteamGameCandidate(42, "Steam Game", "steam-game", "manifest", "C:\\Steam")], [], ["C:\\Steam"]);
+        await fixture.Workspace.PreviewSteamImportAsync(CancellationToken.None);
+        await fixture.Workspace.CommitSteamImportAsync(CancellationToken.None);
+
+        fixture.Workspace.SourceFilter = "Steam";
+        Assert.Equal("Steam Game", Assert.Single(fixture.Workspace.Games).Name);
+        fixture.Workspace.SourceFilter = "All sources";
+        fixture.Workspace.AvailabilityFilter = "Missing target";
+        Assert.Equal("Manual Game", Assert.Single(fixture.Workspace.Games).Name);
+        Assert.True(fixture.Workspace.HasMissingTargets);
+
+        fixture.Workspace.LibraryViewMode = "List";
+        Assert.True(fixture.Workspace.IsListLibraryView);
+        Assert.False(fixture.Workspace.IsGridLibraryView);
+        fixture.Workspace.LibraryCardSize = "Large";
+        Assert.Equal(244, fixture.Workspace.LibraryCardWidth);
+        Assert.Equal(374, fixture.Workspace.LibraryCardHeight);
+        Assert.Equal(286, fixture.Workspace.LibraryCoverHeight);
+    }
+
+    [Fact]
+    public async Task CollectionFilterShowsOnlyMembersAndCanBeCleared()
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.Workspace.InitializeAsync(CancellationToken.None);
+        foreach (var name in new[] { "Member", "Outside" })
+        {
+            fixture.Workspace.BeginAdd();
+            fixture.Workspace.Name = name;
+            fixture.Workspace.Platform = "Windows";
+            fixture.Workspace.Target = $"C:\\Games\\{name}.exe";
+            await fixture.Workspace.SaveDraftAsync(CancellationToken.None);
+        }
+        fixture.Workspace.CollectionName = "Favorites shelf";
+        await fixture.Workspace.CreateCollectionAsync(CancellationToken.None);
+        fixture.Workspace.SelectedCollection = Assert.Single(fixture.Workspace.Collections);
+        fixture.Workspace.SelectedGame = fixture.Workspace.Games.Single(game => game.Name == "Member");
+        await fixture.Workspace.ToggleCollectionMembershipAsync(CancellationToken.None);
+
+        fixture.Workspace.LibraryCollectionFilter = Assert.Single(fixture.Workspace.Collections);
+        Assert.Equal("Member", Assert.Single(fixture.Workspace.Games).Name);
+        fixture.Workspace.ClearLibraryCollectionFilter();
+        Assert.Equal(2, fixture.Workspace.Games.Count);
+    }
+
+    [Fact]
+    public async Task SmartCollectionsAreDeterministicAndIntersectWithExistingFilters()
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.Workspace.InitializeAsync(CancellationToken.None);
+        fixture.Workspace.Name = "Manual Favorite";
+        fixture.Workspace.Platform = "Windows";
+        fixture.Workspace.Target = "C:\\Games\\Favorite.exe";
+        await fixture.Workspace.SaveDraftAsync(CancellationToken.None);
+        await fixture.Workspace.ToggleFavoriteAsync(CancellationToken.None);
+        fixture.SteamSource.Result = new SteamCatalogScanResult(
+            [new SteamGameCandidate(99, "Steam Game", "steam-game", "manifest", "C:\\Steam")], [], ["C:\\Steam"]);
+        await fixture.Workspace.PreviewSteamImportAsync(CancellationToken.None);
+        await fixture.Workspace.CommitSteamImportAsync(CancellationToken.None);
+
+        fixture.Workspace.SmartCollectionFilter = "Manual games";
+        Assert.Equal("Manual Favorite", Assert.Single(fixture.Workspace.Games).Name);
+        fixture.Workspace.SourceFilter = "Steam";
+        Assert.Empty(fixture.Workspace.Games);
+        fixture.Workspace.SourceFilter = "All sources";
+        fixture.Workspace.SmartCollectionFilter = "Favorites";
+        Assert.Equal("Manual Favorite", Assert.Single(fixture.Workspace.Games).Name);
+        fixture.Workspace.ClearSmartCollectionFilter();
+        Assert.Equal(2, fixture.Workspace.Games.Count);
+    }
+
+    [Fact]
+    public async Task DuplicateReviewFindsSameExecutableWithoutMutatingLibrary()
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.Workspace.InitializeAsync(CancellationToken.None);
+        foreach (var name in new[] { "First Record", "Second Record" })
+        {
+            fixture.Workspace.BeginAdd();
+            fixture.Workspace.Name = name;
+            fixture.Workspace.Platform = "Windows";
+            fixture.Workspace.Target = "C:\\Games\\Shared.exe";
+            await fixture.Workspace.SaveDraftAsync(CancellationToken.None);
+        }
+
+        var duplicate = Assert.Single(fixture.Workspace.DuplicateCandidates);
+        Assert.Equal("Same normalized executable target", duplicate.Reason);
+        Assert.Equal(2, fixture.Workspace.LibraryGameCount);
+        Assert.Equal(2, fixture.Workspace.Games.Count);
+    }
+
+    [Fact]
+    public async Task BulkSelectionFavoritesAndRefreshAreBoundedExplicitActions()
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.Workspace.InitializeAsync(CancellationToken.None);
+        foreach (var name in new[] { "One", "Two" })
+        {
+            fixture.Workspace.BeginAdd();
+            fixture.Workspace.Name = name;
+            fixture.Workspace.Platform = "Windows";
+            fixture.Workspace.Target = $"C:\\Games\\{name}.exe";
+            await fixture.Workspace.SaveDraftAsync(CancellationToken.None);
+        }
+        foreach (var game in fixture.Workspace.Games) fixture.Workspace.SetLibraryGameSelected(game, selected: true);
+
+        await fixture.Workspace.FavoriteSelectedGamesAsync(CancellationToken.None);
+        await fixture.Workspace.RefreshSelectedGamesMetadataAsync(CancellationToken.None);
+
+        Assert.Equal(2, fixture.Workspace.SelectedLibraryGameCount);
+        Assert.All(fixture.Workspace.Games, static game => Assert.True(game.IsFavorite));
+        Assert.Equal(2, fixture.Enrichment.RefreshCalls);
+        fixture.Workspace.ClearLibrarySelection();
+        Assert.False(fixture.Workspace.HasLibraryMultiSelection);
+    }
+
+    [Fact]
+    public async Task LargeLibraryRenderingAndDuplicateReviewRemainBounded()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var games = Enumerable.Range(0, 1_000).Select(index => new LibraryItem(
+            GameId.New(),
+            $"Game {index:D4}",
+            "Windows",
+            "Manual",
+            new LaunchTarget("C:\\Games\\Shared.exe", [], null, LaunchTargetKind.Executable),
+            new GameMetadata(null, null, null, null, null, null),
+            false,
+            now,
+            now)).ToArray();
+        using var fixture = new WorkspaceFixture(games);
+
+        await fixture.Workspace.InitializeAsync(CancellationToken.None);
+
+        Assert.Equal(1_000, fixture.Workspace.Games.Count);
+        Assert.Equal(200, fixture.Workspace.RenderedGames.Count);
+        Assert.True(fixture.Workspace.HasMoreLibraryGames);
+        fixture.Workspace.LoadMoreLibraryGames();
+        Assert.Equal(400, fixture.Workspace.RenderedGames.Count);
+        Assert.Equal(100, fixture.Workspace.DuplicateCandidates.Count);
+        Assert.True(fixture.Workspace.DuplicateReviewTruncated);
+    }
+
+    [Fact]
+    public async Task LocateGameChangesOnlyManualLibraryTargetAndRejectsSteamEntries()
+    {
+        using var fixture = new WorkspaceFixture();
+        var replacement = Path.Combine(Path.GetTempPath(), $"NovaLauncher-Relocate-{Guid.NewGuid():N}.exe");
+        await File.WriteAllBytesAsync(replacement, [0x4D, 0x5A]);
+        try
+        {
+            await fixture.Workspace.InitializeAsync(CancellationToken.None);
+            fixture.Workspace.Name = "Repair Me";
+            fixture.Workspace.Platform = "Windows";
+            fixture.Workspace.Target = "C:\\Games\\Old.exe";
+            await fixture.Workspace.SaveDraftAsync(CancellationToken.None);
+
+            await fixture.Workspace.RelocateSelectedManualGameAsync(replacement, CancellationToken.None);
+            Assert.Equal(replacement, fixture.Workspace.SelectedGame!.LaunchTarget.Target);
+            Assert.Contains("local library record", fixture.Workspace.Status, StringComparison.OrdinalIgnoreCase);
+
+            fixture.SteamSource.Result = new SteamCatalogScanResult(
+                [new SteamGameCandidate(7, "Steam Only", "steam-only", "manifest", "C:\\Steam")], [], ["C:\\Steam"]);
+            await fixture.Workspace.PreviewSteamImportAsync(CancellationToken.None);
+            await fixture.Workspace.CommitSteamImportAsync(CancellationToken.None);
+            fixture.Workspace.SelectedGame = fixture.Workspace.Games.Single(game => game.Source == "Steam");
+            await fixture.Workspace.RelocateSelectedManualGameAsync("D:\\Wrong.exe", CancellationToken.None);
+            Assert.Contains("only for manually added", fixture.Workspace.Status, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(replacement);
+        }
+    }
+
+    [Fact]
     public async Task SteamImportRequiresPreviewAndRefreshesLibraryOnlyAfterCommit()
     {
         using var fixture = new WorkspaceFixture();
@@ -257,9 +462,12 @@ public sealed class LibraryWorkspaceViewModelTests
         private readonly LibraryCoordinator _library;
         private readonly CollectionCoordinator _collections;
 
-        public WorkspaceFixture()
+        public WorkspaceFixture(IReadOnlyList<LibraryItem>? initialGames = null)
         {
-            _library = new LibraryCoordinator(new MemoryStore<GamesDocument>(), new ManualGameDraftValidator(), TimeProvider.System);
+            _library = new LibraryCoordinator(
+                new MemoryStore<GamesDocument>(initialGames is null ? null : new GamesDocument(GamesDocument.CurrentSchemaVersion, initialGames)),
+                new ManualGameDraftValidator(),
+                TimeProvider.System);
             _collections = new CollectionCoordinator(new MemoryStore<CollectionsDocument>(), TimeProvider.System);
             Backups = new FakeBackups();
             Launcher = new FakeLauncher();
@@ -270,7 +478,7 @@ public sealed class LibraryWorkspaceViewModelTests
                 Launcher,
                 Backups,
                 new SteamImportCoordinator(SteamSource, _library),
-                new FakeEnrichment(),
+                Enrichment = new FakeEnrichment(),
                 new FakeAchievements(),
                 new FakeThemes());
         }
@@ -282,6 +490,8 @@ public sealed class LibraryWorkspaceViewModelTests
         public FakeLauncher Launcher { get; }
 
         public ConfigurableSteamCatalogSource SteamSource { get; }
+
+        public FakeEnrichment Enrichment { get; }
 
         public void Dispose()
         {
@@ -300,8 +510,16 @@ public sealed class LibraryWorkspaceViewModelTests
 
     private sealed class FakeEnrichment : IGameEnrichmentService
     {
+        public int RefreshCalls { get; private set; }
+
         public Task<ProviderRefreshResult> RefreshAsync(GameId gameId, bool forceRefresh, CancellationToken cancellationToken) =>
-            Task.FromResult(new ProviderRefreshResult(ProviderResultStatus.NoData, null, false, false, [], "No fake metadata."));
+            Task.FromResult(Refresh(gameId));
+
+        private ProviderRefreshResult Refresh(GameId gameId)
+        {
+            RefreshCalls++;
+            return new ProviderRefreshResult(ProviderResultStatus.NoData, null, false, false, [], "No fake metadata.");
+        }
     }
 
     private sealed class FakeAchievements : IAchievementService
@@ -317,6 +535,7 @@ public sealed class LibraryWorkspaceViewModelTests
         public IReadOnlyList<ThemeOption> Themes { get; } = [new("nova-dark", "Nova Dark")];
         public string CurrentThemeId => "nova-dark";
         public bool ReduceMotion { get; private set; }
+        public LibraryViewPreferences LibraryPreferences { get; private set; } = new("Grid", "Medium", "Name", "All sources", "All platforms", "All games", false);
         public string? TailscalePeerAddress => null;
         public Task<string?> InitializeAsync(CancellationToken cancellationToken) => Task.FromResult<string?>(null);
         public Task<string?> ApplyAsync(string themeId, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
@@ -326,12 +545,19 @@ public sealed class LibraryWorkspaceViewModelTests
             return Task.FromResult<string?>(null);
         }
         public Task<string?> ConfigureTailscalePeerAsync(string address, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+        public Task<string?> SaveLibraryPreferencesAsync(LibraryViewPreferences preferences, CancellationToken cancellationToken)
+        {
+            LibraryPreferences = preferences;
+            return Task.FromResult<string?>(null);
+        }
     }
 
     private sealed class MemoryStore<TDocument> : IDocumentStore<TDocument>
         where TDocument : class, IVersionedDocument
     {
         private TDocument? _document;
+
+        public MemoryStore(TDocument? document = null) => _document = document;
 
         public Task<DocumentLoadResult<TDocument>> LoadAsync(CancellationToken cancellationToken) =>
             Task.FromResult(_document is null

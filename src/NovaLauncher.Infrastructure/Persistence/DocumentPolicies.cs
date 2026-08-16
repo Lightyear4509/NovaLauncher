@@ -232,6 +232,17 @@ public sealed class SettingsDocumentPolicy : IDocumentPolicy<SettingsDocument>
             return "The configured Tailscale peer address is invalid or outside the Tailscale address ranges.";
         }
 
+        var settings = document.Settings;
+        if (settings.LibraryViewMode is not ("Grid" or "List") ||
+            settings.LibraryCardSize is not ("Small" or "Medium" or "Large") ||
+            settings.LibrarySort is not ("Name" or "Recently played" or "Date added" or "Playtime" or "Release date" or "Platform" or "Recently updated") ||
+            settings.LibrarySourceFilter is not ("All sources" or "Manual" or "Steam") ||
+            settings.LibraryPlatformFilter is not ("All platforms" or "Windows" or "Linux" or "macOS" or "Other") ||
+            settings.LibraryAvailabilityFilter is not ("All games" or "Available" or "Missing target"))
+        {
+            return "The configured Library view preferences are invalid.";
+        }
+
         return document.Settings.ThemeId.Length > 100
             ? "The theme ID cannot exceed 100 characters."
             : null;

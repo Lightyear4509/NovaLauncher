@@ -4,6 +4,15 @@ namespace NovaLauncher.Application.Themes;
 
 public sealed record ThemeOption(string Id, string DisplayName);
 
+public sealed record LibraryViewPreferences(
+    string ViewMode,
+    string CardSize,
+    string Sort,
+    string SourceFilter,
+    string PlatformFilter,
+    string AvailabilityFilter,
+    bool FavoritesOnly);
+
 public interface IThemeHost
 {
     string CurrentThemeId { get; }
@@ -23,6 +32,8 @@ public interface IThemeService
 
     bool ReduceMotion { get; }
 
+    LibraryViewPreferences LibraryPreferences { get; }
+
     string? TailscalePeerAddress { get; }
 
     Task<string?> InitializeAsync(CancellationToken cancellationToken);
@@ -30,6 +41,8 @@ public interface IThemeService
     Task<string?> ApplyAsync(string themeId, CancellationToken cancellationToken);
 
     Task<string?> ConfigureReduceMotionAsync(bool reduceMotion, CancellationToken cancellationToken);
+
+    Task<string?> SaveLibraryPreferencesAsync(LibraryViewPreferences preferences, CancellationToken cancellationToken);
 
     Task<string?> ConfigureTailscalePeerAsync(string address, CancellationToken cancellationToken);
 }
@@ -40,6 +53,7 @@ public sealed class ThemeService(
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SettingsDocument _settings = SettingsDocument.Default;
+    private bool _initialized;
 
     public IReadOnlyList<ThemeOption> Themes { get; } =
     [
@@ -54,18 +68,75 @@ public sealed class ThemeService(
 
     public bool ReduceMotion => _settings.Settings.ReduceMotion;
 
+    public LibraryViewPreferences LibraryPreferences => new(
+        _settings.Settings.LibraryViewMode,
+        _settings.Settings.LibraryCardSize,
+        _settings.Settings.LibrarySort,
+        _settings.Settings.LibrarySourceFilter,
+        _settings.Settings.LibraryPlatformFilter,
+        _settings.Settings.LibraryAvailabilityFilter,
+        _settings.Settings.LibraryFavoritesOnly);
+
     public string? TailscalePeerAddress => _settings.Settings.TailscalePeerAddress;
 
     public async Task<string?> InitializeAsync(CancellationToken cancellationToken)
     {
-        var load = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
-        _settings = load.Document ?? SettingsDocument.Default;
-        var themeId = Themes.Any(item => item.Id == _settings.Settings.ThemeId) ? _settings.Settings.ThemeId : "nova-dark";
-        if (!host.Apply(themeId)) return "The saved theme could not be applied; Nova Dark is active.";
-        if (!host.ApplyMotionPreference(_settings.Settings.ReduceMotion))
-            return "The saved motion preference could not be applied; standard motion is active.";
-        return load.Warning;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_initialized) return null;
+            var load = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
+            _settings = load.Document ?? SettingsDocument.Default;
+            var themeId = Themes.Any(item => item.Id == _settings.Settings.ThemeId) ? _settings.Settings.ThemeId : "nova-dark";
+            if (!host.Apply(themeId)) return "The saved theme could not be applied; Nova Dark is active.";
+            if (!host.ApplyMotionPreference(_settings.Settings.ReduceMotion))
+                return "The saved motion preference could not be applied; standard motion is active.";
+            _initialized = true;
+            return load.Warning;
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
+
+    public async Task<string?> SaveLibraryPreferencesAsync(LibraryViewPreferences preferences, CancellationToken cancellationToken)
+    {
+        if (!IsValidLibraryPreferences(preferences)) return "The selected Library view preferences are invalid.";
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var staged = _settings with
+            {
+                Settings = _settings.Settings with
+                {
+                    LibraryViewMode = preferences.ViewMode,
+                    LibraryCardSize = preferences.CardSize,
+                    LibrarySort = preferences.Sort,
+                    LibrarySourceFilter = preferences.SourceFilter,
+                    LibraryPlatformFilter = preferences.PlatformFilter,
+                    LibraryAvailabilityFilter = preferences.AvailabilityFilter,
+                    LibraryFavoritesOnly = preferences.FavoritesOnly,
+                },
+            };
+            var save = await store.SaveAsync(staged, cancellationToken).ConfigureAwait(false);
+            if (save.Status != DocumentSaveStatus.Saved) return save.Error ?? "Library preferences could not be saved.";
+            _settings = staged;
+            return null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static bool IsValidLibraryPreferences(LibraryViewPreferences value) =>
+        value.ViewMode is "Grid" or "List" &&
+        value.CardSize is "Small" or "Medium" or "Large" &&
+        value.Sort is "Name" or "Recently played" or "Date added" or "Playtime" or "Release date" or "Platform" or "Recently updated" &&
+        value.SourceFilter is "All sources" or "Manual" or "Steam" &&
+        value.PlatformFilter is "All platforms" or "Windows" or "Linux" or "macOS" or "Other" &&
+        value.AvailabilityFilter is "All games" or "Available" or "Missing target";
 
     public async Task<string?> ConfigureReduceMotionAsync(bool reduceMotion, CancellationToken cancellationToken)
     {

@@ -149,6 +149,66 @@ public sealed class LibraryWorkflowTests
         Assert.Equal("Original", Assert.Single(coordinator.Games).Name);
     }
 
+    [Fact]
+    public async Task DuplicateMergeUsesExplicitSurvivorAndDoesNotInflatePlaytime()
+    {
+        var store = new MemoryGamesStore();
+        using var coordinator = new LibraryCoordinator(store, new ManualGameDraftValidator(), TimeProvider.System);
+        var survivor = Assert.IsType<LibraryItem>((await coordinator.AddManualGameAsync(Draft("Keep"), CancellationToken.None)).Item);
+        var duplicate = Assert.IsType<LibraryItem>((await coordinator.AddManualGameAsync(Draft("Remove record"), CancellationToken.None)).Item);
+        await coordinator.ToggleFavoriteAsync(duplicate.Id, CancellationToken.None);
+        await coordinator.AddPlayTimeAsync(survivor.Id, TimeSpan.FromMinutes(20), DateTimeOffset.UtcNow.AddDays(-2), CancellationToken.None);
+        await coordinator.AddPlayTimeAsync(duplicate.Id, TimeSpan.FromMinutes(40), DateTimeOffset.UtcNow.AddDays(-1), CancellationToken.None);
+
+        var preview = coordinator.PreviewDuplicateMerge(survivor.Id, duplicate.Id);
+        var result = await coordinator.CommitDuplicateMergeAsync(preview, CancellationToken.None);
+
+        Assert.True(preview.CanMerge);
+        Assert.Equal(LibraryMutationStatus.Saved, result.Status);
+        var merged = Assert.Single(coordinator.Games);
+        Assert.Equal(survivor.Id, merged.Id);
+        Assert.True(merged.IsFavorite);
+        Assert.Equal(TimeSpan.FromMinutes(40), merged.TotalPlayTime);
+        Assert.DoesNotContain(coordinator.Games, game => game.Id == duplicate.Id);
+    }
+
+    [Fact]
+    public async Task DuplicateMergeRefusesConflictingSaveIdentityAndStalePreview()
+    {
+        var store = new MemoryGamesStore();
+        using var coordinator = new LibraryCoordinator(store, new ManualGameDraftValidator(), TimeProvider.System);
+        var first = Assert.IsType<LibraryItem>((await coordinator.AddManualGameAsync(Draft("First"), CancellationToken.None)).Item);
+        var second = Assert.IsType<LibraryItem>((await coordinator.AddManualGameAsync(Draft("Second"), CancellationToken.None)).Item);
+        await coordinator.SetSaveSyncIdAsync(first.Id, Guid.NewGuid(), "First", CancellationToken.None);
+        await coordinator.SetSaveSyncIdAsync(second.Id, Guid.NewGuid(), "Second", CancellationToken.None);
+        Assert.False(coordinator.PreviewDuplicateMerge(first.Id, second.Id).CanMerge);
+
+        await coordinator.SetSaveSyncIdAsync(second.Id, null, null, CancellationToken.None);
+        var preview = coordinator.PreviewDuplicateMerge(first.Id, second.Id);
+        await coordinator.ToggleFavoriteAsync(first.Id, CancellationToken.None);
+        var stale = await coordinator.CommitDuplicateMergeAsync(preview, CancellationToken.None);
+        Assert.Equal(LibraryMutationStatus.PersistenceFailed, stale.Status);
+        Assert.Equal(2, coordinator.Games.Count);
+    }
+
+    [Fact]
+    public async Task CollectionReferenceReplacementIsAtomicAndDeduplicated()
+    {
+        var store = new MemoryCollectionsStore();
+        using var coordinator = new CollectionCoordinator(store, TimeProvider.System);
+        await coordinator.CreateAsync("RPG", CancellationToken.None);
+        var collection = Assert.Single(coordinator.Collections);
+        var survivor = GameId.New();
+        var duplicate = GameId.New();
+        await coordinator.SetMembershipAsync(collection.Id, survivor, true, CancellationToken.None);
+        await coordinator.SetMembershipAsync(collection.Id, duplicate, true, CancellationToken.None);
+
+        var result = await coordinator.ReplaceGameReferenceAsync(duplicate, survivor, CancellationToken.None);
+
+        Assert.Equal(DocumentSaveStatus.Saved, result.Status);
+        Assert.Equal(survivor, Assert.Single(Assert.Single(coordinator.Collections).GameIds));
+    }
+
     [Theory]
     [InlineData(DocumentLoadStatus.NotFound, LibraryLoadState.Empty)]
     [InlineData(DocumentLoadStatus.Loaded, LibraryLoadState.Ready)]

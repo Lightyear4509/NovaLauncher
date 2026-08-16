@@ -17,6 +17,11 @@ public sealed record LibraryMutationResult(
     IReadOnlyDictionary<string, string> Errors,
     string? Error);
 
+public sealed record DuplicateMergePreview(LibraryItem Survivor, LibraryItem Duplicate, LibraryItem? Merged, string? Error)
+{
+    public bool CanMerge => Merged is not null && Error is null;
+}
+
 public enum LibraryLoadState
 {
     NotLoaded,
@@ -110,6 +115,68 @@ public sealed class LibraryCoordinator(
 
     public Task<LibraryMutationResult> RemoveAsync(GameId gameId, CancellationToken cancellationToken) =>
         MutateExistingAsync(gameId, item: null, cancellationToken);
+
+    public DuplicateMergePreview PreviewDuplicateMerge(GameId survivorId, GameId duplicateId)
+    {
+        var survivor = _games.FirstOrDefault(game => game.Id == survivorId);
+        var duplicate = _games.FirstOrDefault(game => game.Id == duplicateId);
+        if (survivor is null || duplicate is null || survivorId == duplicateId)
+            return new(survivor!, duplicate!, null, "Choose two different existing game records.");
+
+        var identityError = ValidateDuplicateIdentity(survivor, duplicate);
+        if (identityError is not null) return new(survivor, duplicate, null, identityError);
+        if (survivor.SaveSyncId is not null && duplicate.SaveSyncId is not null && survivor.SaveSyncId != duplicate.SaveSyncId)
+            return new(survivor, duplicate, null, "The records have different save-sync identities and cannot be merged automatically.");
+        if (!CompatibleOptionalPath(survivor.SaveDirectory, duplicate.SaveDirectory))
+            return new(survivor, duplicate, null, "The records use different save folders. Choose and verify one before merging.");
+
+        var now = timeProvider.GetUtcNow();
+        var merged = survivor with
+        {
+            Metadata = PreferMetadata(survivor.Metadata, duplicate.Metadata),
+            Artwork = PreferArtwork(survivor.Artwork, duplicate.Artwork),
+            IsFavorite = survivor.IsFavorite || duplicate.IsFavorite,
+            AddedAtUtc = survivor.AddedAtUtc <= duplicate.AddedAtUtc ? survivor.AddedAtUtc : duplicate.AddedAtUtc,
+            UpdatedAtUtc = now,
+            TotalPlayTime = survivor.TotalPlayTime >= duplicate.TotalPlayTime ? survivor.TotalPlayTime : duplicate.TotalPlayTime,
+            LastPlayedAtUtc = Latest(survivor.LastPlayedAtUtc, duplicate.LastPlayedAtUtc),
+            SaveDirectory = survivor.SaveDirectory ?? duplicate.SaveDirectory,
+            SaveSyncId = survivor.SaveSyncId ?? duplicate.SaveSyncId,
+            SaveSyncLabel = survivor.SaveSyncLabel ?? duplicate.SaveSyncLabel,
+        };
+        return new(survivor, duplicate, merged, null);
+    }
+
+    public async Task<LibraryMutationResult> CommitDuplicateMergeAsync(
+        DuplicateMergePreview preview,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+        if (!preview.CanMerge) return PersistenceFailure(preview.Error ?? "The duplicate merge preview is invalid.");
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var survivorIndex = FindIndex(preview.Survivor.Id);
+            var duplicateIndex = FindIndex(preview.Duplicate.Id);
+            if (survivorIndex < 0 || duplicateIndex < 0 || survivorIndex == duplicateIndex)
+                return PersistenceFailure("The library changed after preview. Review the duplicate again.");
+            if (_games[survivorIndex] != preview.Survivor || _games[duplicateIndex] != preview.Duplicate)
+                return PersistenceFailure("The library changed after preview. Review the duplicate again.");
+
+            var staged = _games.Where(game => game.Id != preview.Duplicate.Id).ToList();
+            var stagedSurvivorIndex = staged.FindIndex(game => game.Id == preview.Survivor.Id);
+            staged[stagedSurvivorIndex] = preview.Merged!;
+            var save = await store.SaveAsync(new GamesDocument(GamesDocument.CurrentSchemaVersion, staged), cancellationToken).ConfigureAwait(false);
+            if (save.Status != DocumentSaveStatus.Saved) return PersistenceFailure(save.Error);
+            _games = staged.ToArray();
+            _revision++;
+            return Success(preview.Merged!);
+        }
+        finally
+        {
+            _mutationGate.Release();
+        }
+    }
 
     public async Task<LibraryMutationResult> ApplyEnrichmentAsync(
         GameId gameId,
@@ -581,6 +648,56 @@ public sealed class LibraryCoordinator(
 
     private static bool Contains(IReadOnlyList<string>? values, string token) =>
         values?.Any(value => value.Contains(token, StringComparison.OrdinalIgnoreCase)) == true;
+
+    private static string? ValidateDuplicateIdentity(LibraryItem survivor, LibraryItem duplicate)
+    {
+        if (!string.Equals(survivor.Source, duplicate.Source, StringComparison.OrdinalIgnoreCase))
+            return "Records from different launch sources cannot be merged.";
+        if (string.Equals(survivor.Source, "Steam", StringComparison.OrdinalIgnoreCase))
+            return string.Equals(survivor.SourceItemId, duplicate.SourceItemId, StringComparison.Ordinal)
+                ? null
+                : "Steam records must have the same stable Steam identity.";
+        return string.Equals(NormalizePath(survivor.LaunchTarget.Target), NormalizePath(duplicate.LaunchTarget.Target), StringComparison.OrdinalIgnoreCase)
+            ? null
+            : "Manual records must resolve to the same executable target.";
+    }
+
+    private static bool CompatibleOptionalPath(string? first, string? second) =>
+        first is null || second is null || string.Equals(NormalizePath(first), NormalizePath(second), StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizePath(string path)
+    {
+        try { return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { return path.Trim(); }
+    }
+
+    private static DateTimeOffset? Latest(DateTimeOffset? first, DateTimeOffset? second) =>
+        first is null ? second : second is null || first >= second ? first : second;
+
+    private static GameMetadata PreferMetadata(GameMetadata first, GameMetadata second) => new(
+        Prefer(first.Description, second.Description),
+        Prefer(first.Genres, second.Genres),
+        Prefer(first.Developers, second.Developers),
+        Prefer(first.Publishers, second.Publishers),
+        Prefer(first.ReleaseDate, second.ReleaseDate),
+        Prefer(first.Rating, second.Rating));
+
+    private static MetadataValue<T>? Prefer<T>(MetadataValue<T>? first, MetadataValue<T>? second) =>
+        first?.Provenance.IsManual == true ? first : second?.Provenance.IsManual == true ? second : first ?? second;
+
+    private static GameArtwork? PreferArtwork(GameArtwork? first, GameArtwork? second)
+    {
+        if (first is null) return second;
+        if (second is null) return first;
+        return new(
+            PreferArtworkReference(first.Cover, second.Cover),
+            PreferArtworkReference(first.Hero, second.Hero),
+            PreferArtworkReference(first.Logo, second.Logo),
+            PreferArtworkReference(first.Background, second.Background));
+    }
+
+    private static ArtworkReference PreferArtworkReference(ArtworkReference first, ArtworkReference second) =>
+        first.Provenance.IsManual || !first.IsPlaceholder ? first : second;
 
     private static bool NeedsSteamUpdate(LibraryItem existing, SteamGameCandidate candidate) =>
         !string.Equals(existing.Source, "Steam", StringComparison.Ordinal) ||

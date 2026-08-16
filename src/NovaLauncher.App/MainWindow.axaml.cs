@@ -79,6 +79,74 @@ public sealed partial class MainWindow : Window
 
     private void OnToggleNavigation(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.ToggleNavigation();
 
+    private void OnUseLibraryGrid(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.LibraryViewMode = "Grid";
+
+    private void OnUseLibraryList(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.LibraryViewMode = "List";
+
+    private void OnClearLibraryCollectionFilter(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.ClearLibraryCollectionFilter();
+
+    private void OnClearSmartCollectionFilter(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.ClearSmartCollectionFilter();
+
+    private void OnClearLibrarySelection(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.ClearLibrarySelection();
+
+    private void OnLoadMoreLibraryGames(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.LoadMoreLibraryGames();
+
+    private async void OnFavoriteSelectedGames(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.FavoriteSelectedGamesAsync(_lifetimeCancellation.Token));
+
+    private async void OnRefreshSelectedGames(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.RefreshSelectedGamesMetadataAsync(_lifetimeCancellation.Token));
+
+    private void OnToggleLibraryGameSelection(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: NovaLauncher.Domain.Library.LibraryItem game }) return;
+        var workspace = ViewModel.Workspace!;
+        workspace.SetLibraryGameSelected(game, !workspace.IsLibraryGameSelected(game.Id));
+    }
+
+    private async void OnContextToggleFavorite(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: NovaLauncher.Domain.Library.LibraryItem game }) return;
+        ViewModel.Workspace!.SelectedGame = game;
+        await ExecuteAsync(() => ViewModel.Workspace.ToggleFavoriteAsync(_lifetimeCancellation.Token));
+    }
+
+    private async void OnContextRefreshMetadata(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: NovaLauncher.Domain.Library.LibraryItem game }) return;
+        ViewModel.Workspace!.SelectedGame = game;
+        await ExecuteAsync(() => ViewModel.Workspace.RefreshSelectedMetadataAsync(_lifetimeCancellation.Token));
+    }
+
+    private void OnReviewDuplicate(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: NovaLauncher.Application.Library.DuplicateReviewItem review } button) return;
+        ViewModel.Workspace!.OpenGameDetails(button.Tag as string == "Candidate" ? review.Candidate : review.Primary);
+        OnGameSelectionChanged(null, null!);
+    }
+
+    private async void OnMergeDuplicate(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: NovaLauncher.Application.Library.DuplicateReviewItem review } button) return;
+        await ExecuteAsync(() => ViewModel.Workspace!.MergeDuplicateAsync(
+            review,
+            candidateSurvives: button.Tag as string == "Candidate",
+            _lifetimeCancellation.Token));
+    }
+
+    private async void OnLocateSelectedGame(object? sender, RoutedEventArgs e)
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Locate the installed game executable",
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType("Windows executable") { Patterns = ["*.exe"] }],
+        });
+        var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path))
+            await ExecuteAsync(() => ViewModel.Workspace!.RelocateSelectedManualGameAsync(path, _lifetimeCancellation.Token));
+    }
+
     private async void OnApplyTheme(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
         await ExecuteAsync(() => ViewModel.Workspace!.ApplySelectedThemeAsync(_lifetimeCancellation.Token));
 
@@ -293,6 +361,13 @@ public sealed partial class MainWindow : Window
 
     private async void OnLaunch(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
         await ExecuteAsync(() => ViewModel.Workspace!.LaunchSelectedAsync(_lifetimeCancellation.Token));
+
+    private async void OnLaunchHomeGame(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: NovaLauncher.Domain.Library.LibraryItem game }) return;
+        ViewModel.Workspace!.SelectedGame = game;
+        await ExecuteAsync(() => ViewModel.Workspace.LaunchSelectedAsync(_lifetimeCancellation.Token));
+    }
 
     private async void OnRefreshMetadata(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
         await ExecuteAsync(() => ViewModel.Workspace!.RefreshSelectedMetadataAsync(_lifetimeCancellation.Token));

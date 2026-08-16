@@ -59,6 +59,27 @@ public sealed class ThemeServiceTests
     }
 
     [Fact]
+    public async Task LibraryPreferencesPersistAtomicallyAndRejectUnknownValues()
+    {
+        var store = new Store(SettingsDocument.Default);
+        using var service = new ThemeService(new Host(), store);
+        await service.InitializeAsync(CancellationToken.None);
+        var preferences = new LibraryViewPreferences("List", "Large", "Playtime", "Manual", "Windows", "Missing target", true);
+
+        Assert.Null(await service.SaveLibraryPreferencesAsync(preferences, CancellationToken.None));
+        Assert.Equal(preferences, service.LibraryPreferences);
+        Assert.Equal("List", store.Value!.Settings.LibraryViewMode);
+
+        var invalid = preferences with { ViewMode = "Downloaded view" };
+        Assert.NotNull(await service.SaveLibraryPreferencesAsync(invalid, CancellationToken.None));
+        Assert.Equal(preferences, service.LibraryPreferences);
+
+        store.FailSave = true;
+        Assert.NotNull(await service.SaveLibraryPreferencesAsync(preferences with { CardSize = "Small" }, CancellationToken.None));
+        Assert.Equal("Large", service.LibraryPreferences.CardSize);
+    }
+
+    [Fact]
     public async Task UnknownThemeAndCancellationAreRejected()
     {
         var host = new Host();

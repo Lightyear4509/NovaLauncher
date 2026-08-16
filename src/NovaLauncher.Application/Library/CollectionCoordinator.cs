@@ -68,6 +68,17 @@ public sealed class CollectionCoordinator(IDocumentStore<CollectionsDocument> st
             return collection with { GameIds = ids, UpdatedAtUtc = timeProvider.GetUtcNow() };
         }, cancellationToken);
 
+    public Task<DocumentSaveResult> ReplaceGameReferenceAsync(
+        GameId duplicateId,
+        GameId survivorId,
+        CancellationToken cancellationToken) =>
+        MutateAsync(current => current.Select(collection =>
+        {
+            if (!collection.GameIds.Contains(duplicateId)) return collection;
+            var ids = collection.GameIds.Where(id => id != duplicateId && id != survivorId).Append(survivorId).ToArray();
+            return collection with { GameIds = ids, UpdatedAtUtc = timeProvider.GetUtcNow() };
+        }).ToArray(), cancellationToken);
+
     private async Task<DocumentSaveResult> UpdateAsync(
         GameCollectionId id,
         Func<GameCollection, GameCollection> update,
