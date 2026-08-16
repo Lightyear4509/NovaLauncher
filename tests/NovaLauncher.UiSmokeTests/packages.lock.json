@@ -351,15 +351,15 @@
           "Avalonia.Themes.Fluent": "[12.1.1, )",
           "Microsoft.Extensions.DependencyInjection": "[10.0.10, )",
           "Microsoft.Extensions.Logging.Console": "[10.0.10, )",
-          "NovaLauncher.Application": "[0.1.0-alpha.1, )",
-          "NovaLauncher.Domain": "[0.1.0-alpha.1, )",
-          "NovaLauncher.Infrastructure": "[0.1.0-alpha.1, )"
+          "NovaLauncher.Application": "[0.2.0-alpha.1, )",
+          "NovaLauncher.Domain": "[0.2.0-alpha.1, )",
+          "NovaLauncher.Infrastructure": "[0.2.0-alpha.1, )"
         }
       },
       "novalauncher.application": {
         "type": "Project",
         "dependencies": {
-          "NovaLauncher.Domain": "[0.1.0-alpha.1, )"
+          "NovaLauncher.Domain": "[0.2.0-alpha.1, )"
         }
       },
       "novalauncher.domain": {
@@ -370,8 +370,8 @@
         "dependencies": {
           "Microsoft.Extensions.Http": "[10.0.10, )",
           "Microsoft.Extensions.Logging": "[10.0.10, )",
-          "NovaLauncher.Application": "[0.1.0-alpha.1, )",
-          "NovaLauncher.Domain": "[0.1.0-alpha.1, )",
+          "NovaLauncher.Application": "[0.2.0-alpha.1, )",
+          "NovaLauncher.Domain": "[0.2.0-alpha.1, )",
           "SkiaSharp": "[3.119.4, )"
         }
       },

@@ -49,6 +49,7 @@ public sealed class LibraryWorkspaceViewModel(
     private string _selectedSort = "Name";
     private string _currentPage = "Home";
     private string _selectedThemeId = themes.CurrentThemeId;
+    private bool _reduceMotion = themes.ReduceMotion;
     private string _steamGridDbApiKey = string.Empty;
     private string _tailscalePeerAddress = themes.TailscalePeerAddress ?? string.Empty;
     private string _pairingCode = string.Empty;
@@ -57,6 +58,9 @@ public sealed class LibraryWorkspaceViewModel(
     private string _activeSaveTransfer = "No save transfer is currently running.";
     private bool _isSaveTransferActive;
     private bool _showInitialSaveUploadPrompt;
+    private bool _isNavigationCompact;
+    private readonly Stack<string> _backHistory = new();
+    private readonly Stack<string> _forwardHistory = new();
     private string _saveSyncPairingFeedback = "Enter and save the other device's Tailscale IP before pairing.";
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -79,6 +83,8 @@ public sealed class LibraryWorkspaceViewModel(
     public IReadOnlyList<ThemeOption> ThemeOptions => themes.Themes;
 
     public string SelectedThemeId { get => _selectedThemeId; set => Set(ref _selectedThemeId, value); }
+
+    public bool ReduceMotion { get => _reduceMotion; set => Set(ref _reduceMotion, value); }
 
     public string SteamGridDbApiKey { get => _steamGridDbApiKey; set => Set(ref _steamGridDbApiKey, value); }
 
@@ -171,14 +177,74 @@ public sealed class LibraryWorkspaceViewModel(
 
     public string CurrentPage => _currentPage;
 
+    public bool CanNavigateBack => _backHistory.Count > 0;
+
+    public bool CanNavigateForward => _forwardHistory.Count > 0;
+
+    public bool IsNavigationCompact
+    {
+        get => _isNavigationCompact;
+        private set
+        {
+            if (!Set(ref _isNavigationCompact, value)) return;
+            OnPropertyChanged(nameof(NavigationPaneWidth));
+            OnPropertyChanged(nameof(IsNavigationExpanded));
+            OnPropertyChanged(nameof(HomeNavigationLabel));
+            OnPropertyChanged(nameof(LibraryNavigationLabel));
+            OnPropertyChanged(nameof(SavesNavigationLabel));
+            OnPropertyChanged(nameof(SettingsNavigationLabel));
+        }
+    }
+
+    public bool IsNavigationExpanded => !IsNavigationCompact;
+
+    public double NavigationPaneWidth => IsNavigationCompact ? 82 : 224;
+
+    public string HomeNavigationLabel => IsNavigationCompact ? "⌂" : "⌂  Home";
+
+    public string LibraryNavigationLabel => IsNavigationCompact ? "▦" : "▦  Library";
+
+    public string SavesNavigationLabel => IsNavigationCompact ? "⇅" : "⇅  Saves";
+
+    public string SettingsNavigationLabel => IsNavigationCompact ? "⚙" : "⚙  Settings";
+
     public void NavigateTo(string page)
     {
-        if (page is not ("Home" or "Library" or "Details" or "Saves" or "Settings") || !Set(ref _currentPage, page, nameof(CurrentPage))) return;
+        NavigateCore(page, true);
+    }
+
+    public void NavigateBack()
+    {
+        if (_backHistory.Count == 0) return;
+        _forwardHistory.Push(_currentPage);
+        NavigateCore(_backHistory.Pop(), false);
+    }
+
+    public void NavigateForward()
+    {
+        if (_forwardHistory.Count == 0) return;
+        _backHistory.Push(_currentPage);
+        NavigateCore(_forwardHistory.Pop(), false);
+    }
+
+    public void ToggleNavigation() => IsNavigationCompact = !IsNavigationCompact;
+
+    private void NavigateCore(string page, bool recordHistory)
+    {
+        if (page is not ("Home" or "Library" or "Details" or "Saves" or "Settings") || string.Equals(_currentPage, page, StringComparison.Ordinal)) return;
+        if (recordHistory)
+        {
+            _backHistory.Push(_currentPage);
+            _forwardHistory.Clear();
+        }
+        Set(ref _currentPage, page, nameof(CurrentPage));
         OnPropertyChanged(nameof(IsHomePage));
         OnPropertyChanged(nameof(IsLibraryPage));
         OnPropertyChanged(nameof(IsGameDetailsPage));
         OnPropertyChanged(nameof(IsSavesPage));
         OnPropertyChanged(nameof(IsSettingsPage));
+        OnPropertyChanged(nameof(CanNavigateBack));
+        OnPropertyChanged(nameof(CanNavigateForward));
         if (page == "Saves") RefreshSaveSyncActivities();
         Status = page switch
         {
@@ -612,6 +678,12 @@ public sealed class LibraryWorkspaceViewModel(
     {
         var error = await themes.ApplyAsync(SelectedThemeId, cancellationToken);
         Status = error ?? $"Applied {themes.Themes.First(item => item.Id == SelectedThemeId).DisplayName}.";
+    }
+
+    public async Task ApplyMotionPreferenceAsync(CancellationToken cancellationToken)
+    {
+        var error = await themes.ConfigureReduceMotionAsync(ReduceMotion, cancellationToken);
+        Status = error ?? (ReduceMotion ? "Reduced motion enabled." : "Standard interface motion enabled.");
     }
 
     public async Task ConfigureTailscalePeerAsync(CancellationToken cancellationToken)

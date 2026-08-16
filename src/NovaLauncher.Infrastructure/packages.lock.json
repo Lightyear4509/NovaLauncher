@@ -134,7 +134,7 @@
       "novalauncher.application": {
         "type": "Project",
         "dependencies": {
-          "NovaLauncher.Domain": "[0.1.0-alpha.1, )"
+          "NovaLauncher.Domain": "[0.2.0-alpha.1, )"
         }
       },
       "novalauncher.domain": {

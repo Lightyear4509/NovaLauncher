@@ -9,14 +9,16 @@ public sealed class AvaloniaThemeHost : IThemeHost
 {
     private static readonly Dictionary<string, Palette> Palettes = new(StringComparer.Ordinal)
     {
-        ["nova-dark"] = new("#0B1020", "#111831", "#172448", "#253760", "#F7F8FC", "#B8C1DF", "#63D8FF", "#253760", "#36558C", "#182A50"),
-        ["midnight-blue"] = new("#071525", "#0C223B", "#123454", "#24577E", "#F3FAFF", "#B6D5EA", "#42C8FF", "#24577E", "#326F9D", "#163C5A"),
-        ["ember"] = new("#1B1012", "#2B1719", "#402124", "#71383B", "#FFF7F2", "#E4C2B8", "#FF9A62", "#71383B", "#965052", "#51272A"),
-        ["forest"] = new("#091612", "#10251D", "#17372B", "#286049", "#F2FFF8", "#B7D8C7", "#58D69A", "#286049", "#347A5C", "#193E30"),
-        ["nova-light"] = new("#EEF3FA", "#FFFFFF", "#DCE7F5", "#A9BEDA", "#15213A", "#465873", "#006EA8", "#D5E3F4", "#BDD3EC", "#A9BEDA"),
+        ["nova-dark"] = new("#080D1A", "#10182B", "#172442", "#293858", "#F8FAFF", "#AEB9D2", "#52DAFF", "#9B6DFF", "#53D79A", "#F4BF58", "#FF6B7A", "#D9080D1A", "#263E72", "#1C2A48", "#29446E", "#14213B"),
+        ["midnight-blue"] = new("#061320", "#0C2135", "#12334F", "#285674", "#F4FAFF", "#B3D2E3", "#48CFFF", "#7D91FF", "#55D5A0", "#F0BE62", "#FF7582", "#D9061320", "#1D4E72", "#1D4765", "#2B668A", "#15374F"),
+        ["ember"] = new("#1A0E12", "#2A171C", "#3E2229", "#713D48", "#FFF8F4", "#DFC2BC", "#FF9B68", "#D56DFF", "#6DDAA2", "#F6C45D", "#FF7180", "#D91A0E12", "#67313D", "#673840", "#8B4D58", "#49262D"),
+        ["forest"] = new("#081510", "#10241C", "#17362A", "#2B5C49", "#F3FFF9", "#B8D6C8", "#57D69A", "#7EA6FF", "#57D69A", "#F0C05F", "#FF7380", "#D9081510", "#245742", "#285A46", "#37765C", "#1A4031"),
+        ["nova-light"] = new("#EEF3FA", "#FFFFFF", "#E0E9F6", "#AEC0D8", "#15213A", "#4A5A73", "#006FA8", "#7052D9", "#147A54", "#936300", "#BC3345", "#E6EEF3FA", "#D4E5F7", "#D7E4F3", "#C4D9EF", "#AEC4DE"),
     };
 
     public string CurrentThemeId { get; private set; } = "nova-dark";
+
+    public bool ReduceMotion { get; private set; }
 
     public bool Apply(string themeId)
     {
@@ -30,6 +32,12 @@ public sealed class AvaloniaThemeHost : IThemeHost
         resources["ThemeText"] = Brush.Parse(palette.Text);
         resources["ThemeMuted"] = Brush.Parse(palette.Muted);
         resources["ThemeAccent"] = Brush.Parse(palette.Accent);
+        resources["ThemeAccentSecondary"] = Brush.Parse(palette.AccentSecondary);
+        resources["ThemeSuccess"] = Brush.Parse(palette.Success);
+        resources["ThemeWarning"] = Brush.Parse(palette.Warning);
+        resources["ThemeDanger"] = Brush.Parse(palette.Danger);
+        resources["ThemeOverlay"] = Brush.Parse(palette.Overlay);
+        resources["ThemeNavSelected"] = Brush.Parse(palette.NavSelected);
         resources["ThemeButton"] = Brush.Parse(palette.Button);
         resources["ThemeButtonHover"] = Brush.Parse(palette.ButtonHover);
         resources["ThemeButtonPressed"] = Brush.Parse(palette.ButtonPressed);
@@ -37,5 +45,32 @@ public sealed class AvaloniaThemeHost : IThemeHost
         return true;
     }
 
-    private sealed record Palette(string Background, string Surface, string Elevated, string Border, string Text, string Muted, string Accent, string Button, string ButtonHover, string ButtonPressed);
+    public bool ApplyMotionPreference(bool reduceMotion)
+    {
+        if (!Dispatcher.UIThread.CheckAccess()) return Dispatcher.UIThread.Invoke(() => ApplyMotionPreference(reduceMotion));
+        if (Avalonia.Application.Current is null) return false;
+        Avalonia.Application.Current.Resources["MotionDuration"] = reduceMotion
+            ? TimeSpan.Zero
+            : TimeSpan.FromMilliseconds(160);
+        ReduceMotion = reduceMotion;
+        return true;
+    }
+
+    private sealed record Palette(
+        string Background,
+        string Surface,
+        string Elevated,
+        string Border,
+        string Text,
+        string Muted,
+        string Accent,
+        string AccentSecondary,
+        string Success,
+        string Warning,
+        string Danger,
+        string Overlay,
+        string NavSelected,
+        string Button,
+        string ButtonHover,
+        string ButtonPressed);
 }

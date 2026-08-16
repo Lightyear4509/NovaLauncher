@@ -9,7 +9,10 @@
     <ProjectReference Include="..\..\src\NovaLauncher.App\NovaLauncher.App.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\..\src\NovaLauncher.App\App.axaml" Link="App.axaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\src\NovaLauncher.App\App.axaml.cs" Link="App.axaml.cs" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\NovaLauncher.App\AvaloniaThemeHost.cs" Link="AvaloniaThemeHost.cs" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\NovaLauncher.App\Assets\NovaLauncher.ico" Link="Assets\NovaLauncher.ico" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\src\NovaLauncher.App\MainWindow.axaml" Link="MainWindow.axaml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
