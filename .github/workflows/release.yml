@@ -38,8 +38,18 @@ jobs:
           $signature = Get-AuthenticodeSignature inno.exe
           if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B\.V\.') { throw 'Invalid Inno Setup signature.' }
           $dir = Join-Path $PWD '.tools\InnoSetup'
-          & .\inno.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER "/DIR=$dir"
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$dir\ISCC.exe")) { throw 'Inno Setup installation failed.' }
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $arguments = @(
+            '/PORTABLE=1'
+            '/VERYSILENT'
+            '/SUPPRESSMSGBOXES'
+            '/NORESTART'
+            "/DIR=`"$dir`""
+          )
+          $process = Start-Process -FilePath (Join-Path $PWD 'inno.exe') -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0 -or -not (Test-Path (Join-Path $dir 'ISCC.exe') -PathType Leaf)) {
+            throw "Inno Setup portable installation failed with exit code $($process.ExitCode)."
+          }
       - name: Build installer, portable ZIP, SBOM, and checksums
         shell: pwsh
         run: .\eng\Build-Release.ps1
