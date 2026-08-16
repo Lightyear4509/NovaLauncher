@@ -10,31 +10,53 @@
     xmlns:vm="using:NovaLauncher.Application"
     x:DataType="vm:MainWindowViewModel"
     Title="NovaLauncher"
-    Width="1180"
-    Height="760"
-    MinWidth="760"
-    MinHeight="560"
+    Icon="avares://NovaLauncher.App/Assets/NovaLauncher.ico"
+    Width="1320"
+    Height="820"
+    MinWidth="820"
+    MinHeight="600"
     AutomationProperties.Name="{x:Static local:ShellAccessibility.MainWindow}"
     Opened="OnOpened"
     Closed="OnClosed">
-  <Grid RowDefinitions="Auto,*,Auto">
-    <Border Background="{DynamicResource ThemeSurface}" Padding="20,14">
-      <TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding ProductName}" />
+  <Grid RowDefinitions="76,*,Auto,Auto">
+    <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,0,0,1" Padding="22,12">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="10">
+        <Border Width="48" Height="48" CornerRadius="14" Background="{DynamicResource ThemeElevated}" ClipToBounds="True">
+          <Image Source="avares://NovaLauncher.App/Assets/novalauncher-mark-concept.png" Stretch="Uniform" Margin="5" AutomationProperties.Name="NovaLauncher brand mark" />
+        </Border>
+        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+          <TextBlock FontSize="20" FontWeight="Bold" Text="{Binding ProductName}" LetterSpacing="0.4" />
+          <TextBlock Text="YOUR GAMES · YOUR SPACE" Classes="eyebrow" />
+        </StackPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Center">
+          <Button Classes="subtle" Content="←" Click="OnNavigateBack" IsEnabled="{Binding Workspace.CanNavigateBack}" ToolTip.Tip="Back" AutomationProperties.Name="Go to previous page" />
+          <Button Classes="subtle" Content="→" Click="OnNavigateForward" IsEnabled="{Binding Workspace.CanNavigateForward}" ToolTip.Tip="Forward" AutomationProperties.Name="Go to next page" />
+        </StackPanel>
+        <Border Grid.Column="4" Background="{DynamicResource ThemeElevated}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="99" Padding="14,7" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Ellipse Width="8" Height="8" Fill="{DynamicResource ThemeSuccess}" />
+            <TextBlock Text="LOCAL-FIRST" Classes="eyebrow" VerticalAlignment="Center" />
+          </StackPanel>
+        </Border>
+      </Grid>
     </Border>
 
-    <Grid Grid.Row="1" ColumnDefinitions="190,*">
-      <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,1,1,0" Padding="14,24">
+    <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
+      <Border Width="{Binding Workspace.NavigationPaneWidth}" Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,0,1,0" Padding="12,20">
         <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="8">
-          <TextBlock Text="EXPLORE" FontSize="11" Foreground="{DynamicResource ThemeMuted}" Margin="10,0,0,8" />
-          <Button Grid.Row="1" Content="{DynamicResource NavHome}" HorizontalContentAlignment="Left" Click="OnShowHome" AutomationProperties.Name="Open Home page" />
-          <Button Grid.Row="2" Content="{DynamicResource NavLibrary}" HorizontalContentAlignment="Left" Click="OnShowLibrary" AutomationProperties.Name="Open Library page" />
+          <StackPanel Spacing="8">
+            <Button Classes="subtle" Content="☰" Click="OnToggleNavigation" ToolTip.Tip="Expand or collapse navigation" AutomationProperties.Name="Toggle navigation size" />
+            <TextBlock Text="EXPLORE" Classes="eyebrow" Margin="12,0,0,8" IsVisible="{Binding Workspace.IsNavigationExpanded}" />
+          </StackPanel>
+          <Button Grid.Row="1" Classes="nav" Content="{Binding Workspace.HomeNavigationLabel}" Click="OnShowHome" ToolTip.Tip="Home" AutomationProperties.Name="Open Home page" />
+          <Button Grid.Row="2" Classes="nav" Content="{Binding Workspace.LibraryNavigationLabel}" Click="OnShowLibrary" ToolTip.Tip="Library" AutomationProperties.Name="Open Library page" />
           <StackPanel Grid.Row="4" Spacing="8">
-            <Button Content="{DynamicResource NavSaves}" HorizontalContentAlignment="Left" Click="OnShowSaves" AutomationProperties.Name="Open Saves page" />
-            <Button Content="{DynamicResource NavSettings}" HorizontalContentAlignment="Left" Click="OnShowSettings" AutomationProperties.Name="Open Settings and Diagnostics page" />
-            <Border Background="{DynamicResource ThemeElevated}" CornerRadius="10" Padding="12">
-              <StackPanel>
-                <TextBlock Text="Local-first" FontWeight="SemiBold" />
-                <TextBlock Text="No telemetry or background sync" FontSize="11" Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+            <Button Classes="nav" Content="{Binding Workspace.SavesNavigationLabel}" Click="OnShowSaves" ToolTip.Tip="Saves" AutomationProperties.Name="Open Saves page" />
+            <Button Classes="nav" Content="{Binding Workspace.SettingsNavigationLabel}" Click="OnShowSettings" ToolTip.Tip="Settings" AutomationProperties.Name="Open Settings and Diagnostics page" />
+            <Border Classes="elevated-card" Padding="14" Margin="0,10,0,0" IsVisible="{Binding Workspace.IsNavigationExpanded}">
+              <StackPanel Spacing="5">
+                <TextBlock Text="PRIVATE BY DESIGN" Classes="eyebrow" />
+                <TextBlock Text="Your library stays local. Nothing is uploaded unless you explicitly start a supported operation." FontSize="11" Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
               </StackPanel>
             </Border>
           </StackPanel>
@@ -45,18 +67,27 @@
         <Grid Margin="30" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="20">
           <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
             <StackPanel>
-              <TextBlock Text="Library" FontSize="34" FontWeight="Bold" />
+              <TextBlock Text="Library" Classes="page-title" />
               <TextBlock Text="Installed games on this device" Foreground="{DynamicResource ThemeMuted}" />
             </StackPanel>
-            <Button Grid.Column="1" Content="Add installed game" Click="OnPickGameExecutable" AutomationProperties.Name="Choose an installed game executable" />
+            <Button Grid.Column="1" Classes="primary" Content="Add installed game" Click="OnPickGameExecutable" AutomationProperties.Name="Choose an installed game executable" />
             <Button Grid.Column="2" Content="Import Steam games" Click="OnPreviewSteamImport" AutomationProperties.Name="Preview Steam library import" />
           </Grid>
-          <TextBlock Grid.Row="1" Text="No games yet. Add an installed .exe or import your Steam library." IsVisible="{Binding Workspace.IsEmpty}" AutomationProperties.Name="Empty library message" />
+          <Border Grid.Row="1" Classes="empty-state" IsVisible="{Binding Workspace.IsEmpty}" AutomationProperties.Name="Empty library message">
+            <StackPanel Spacing="10" HorizontalAlignment="Center">
+              <TextBlock Text="Your library is ready for its first game" FontSize="22" FontWeight="SemiBold" TextAlignment="Center" />
+              <TextBlock Text="Choose an installed Windows executable or preview your existing Steam library. NovaLauncher will not modify the game files." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="520" />
+              <WrapPanel ItemSpacing="8" HorizontalAlignment="Center">
+                <Button Classes="primary" Content="Choose installed game" Click="OnPickGameExecutable" AutomationProperties.Name="Choose first installed game executable" />
+                <Button Content="Preview Steam library" Click="OnPreviewSteamImport" AutomationProperties.Name="Preview Steam library from empty state" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
           <ItemsControl Grid.Row="2" ItemsSource="{Binding Workspace.Games}" AutomationProperties.Name="Game card library">
             <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="210" ItemHeight="330" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="domain:LibraryItem">
-                <Button Width="194" Height="314" Margin="8" Padding="0" Click="OnOpenGameDetails" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Open game details">
+                <Button Classes="game-card" Width="194" Height="314" Margin="8" Padding="0" Click="OnOpenGameDetails" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Open game details">
                   <Grid RowDefinitions="230,*">
                     <Border Background="{DynamicResource ThemeElevated}" CornerRadius="12,12,0,0" ClipToBounds="True">
                       <Grid>
@@ -116,7 +147,7 @@
           <Grid ColumnDefinitions="2*,*" ColumnSpacing="28">
             <StackPanel Spacing="14">
               <WrapPanel ItemSpacing="10">
-                <Button Content="Play" Click="OnLaunch" AutomationProperties.Name="Launch selected game" />
+                <Button Classes="primary" Content="Play" Click="OnLaunch" AutomationProperties.Name="Launch selected game" />
                 <Button Content="Refresh metadata" Click="OnRefreshMetadata" AutomationProperties.Name="Refresh selected game metadata and artwork" />
                 <Button Content="Add cover" Click="OnAddManualCover" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Choose custom cover for manual game" />
                 <Button Content="Remove cover" Click="OnRemoveManualCover" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Remove custom cover from manual game" />
@@ -188,7 +219,7 @@
       <ScrollViewer Grid.Column="1" IsVisible="{Binding Workspace.IsHomePage}">
         <StackPanel Margin="34,30" Spacing="22">
           <StackPanel>
-            <TextBlock Text="Welcome home" FontSize="34" FontWeight="Bold" />
+            <TextBlock Text="Welcome home" Classes="page-title" />
             <TextBlock Text="Your games, favorites, and recent additions in one calm place." FontSize="16" Foreground="{DynamicResource ThemeMuted}" />
           </StackPanel>
           <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">
@@ -207,7 +238,7 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="domain:LibraryItem">
-                <Button Width="206" Height="256" Padding="0" Margin="0,0,14,14" Click="OnOpenGameDetails" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Open highlighted game details">
+                <Button Classes="game-card" Width="206" Height="256" Padding="0" Margin="0,0,14,14" Click="OnOpenGameDetails" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Open highlighted game details">
                   <Grid RowDefinitions="190,*">
                     <Border Background="{DynamicResource ThemeElevated}" CornerRadius="14,14,0,0" ClipToBounds="True">
                       <Grid>
@@ -231,7 +262,7 @@
 
       <ScrollViewer Grid.Column="1" IsVisible="{Binding Workspace.IsSavesPage}">
         <StackPanel Margin="34,30" Spacing="20" MaxWidth="820" HorizontalAlignment="Left">
-          <TextBlock Text="Downloads &amp; Saves" FontSize="34" FontWeight="Bold" />
+          <TextBlock Text="Downloads &amp; Saves" Classes="page-title" />
           <TextBlock Text="Track encrypted cross-device save downloads and uploads. Full-game transfer is not enabled in this build." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
           <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">
             <StackPanel Spacing="10">
@@ -290,7 +321,7 @@
 
       <ScrollViewer Grid.Column="1" IsVisible="{Binding Workspace.IsSettingsPage}">
         <StackPanel Margin="34,30" Spacing="20" MaxWidth="760" HorizontalAlignment="Left">
-          <TextBlock Text="Settings &amp; Diagnostics" FontSize="34" FontWeight="Bold" />
+          <TextBlock Text="Settings &amp; Diagnostics" Classes="page-title" />
           <TextBlock Text="Appearance and local health information. Diagnostics remain on this device." Foreground="{DynamicResource ThemeMuted}" />
           <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="16" Padding="24">
             <StackPanel Spacing="12">
@@ -305,6 +336,8 @@
                 </ComboBox.ItemTemplate>
               </ComboBox>
               <Button Content="Apply theme" Click="OnApplyTheme" AutomationProperties.Name="Apply selected built-in theme" />
+              <CheckBox Content="Reduce motion" IsChecked="{Binding Workspace.ReduceMotion}" AutomationProperties.Name="Reduce interface motion" />
+              <Button Content="Apply motion preference" Click="OnApplyMotionPreference" AutomationProperties.Name="Apply interface motion preference" />
               <TextBlock Text="Five trusted built-in themes are available. Downloaded/community themes are not loaded." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
             </StackPanel>
           </Border>
@@ -371,12 +404,17 @@
       </ScrollViewer>
     </Grid>
 
-    <Border Grid.Row="2" Background="{DynamicResource ThemeSurface}" Padding="20,12">
-      <TextBlock
-          Text="{Binding Workspace.Status}"
-          TextWrapping="Wrap"
-          AutomationProperties.Name="NovaLauncher operation status"
-          AutomationProperties.LiveSetting="Polite" />
+    <Border Grid.Row="2" Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,1,0,0" Padding="22,11">
+      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+        <Ellipse Width="7" Height="7" Fill="{DynamicResource ThemeAccent}" VerticalAlignment="Center" />
+        <TextBlock
+            Grid.Column="1"
+            Text="{Binding Workspace.Status}"
+            TextWrapping="Wrap"
+            AutomationProperties.Name="NovaLauncher operation status"
+            AutomationProperties.LiveSetting="Polite" />
+      </Grid>
     </Border>
+    <ProgressBar Grid.Row="3" IsIndeterminate="True" IsVisible="{Binding Workspace.IsBusy}" AutomationProperties.Name="NovaLauncher operation in progress" />
   </Grid>
 </Window>

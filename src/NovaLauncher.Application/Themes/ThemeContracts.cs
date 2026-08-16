@@ -8,7 +8,11 @@ public interface IThemeHost
 {
     string CurrentThemeId { get; }
 
+    bool ReduceMotion { get; }
+
     bool Apply(string themeId);
+
+    bool ApplyMotionPreference(bool reduceMotion);
 }
 
 public interface IThemeService
@@ -17,11 +21,15 @@ public interface IThemeService
 
     string CurrentThemeId { get; }
 
+    bool ReduceMotion { get; }
+
     string? TailscalePeerAddress { get; }
 
     Task<string?> InitializeAsync(CancellationToken cancellationToken);
 
     Task<string?> ApplyAsync(string themeId, CancellationToken cancellationToken);
+
+    Task<string?> ConfigureReduceMotionAsync(bool reduceMotion, CancellationToken cancellationToken);
 
     Task<string?> ConfigureTailscalePeerAsync(string address, CancellationToken cancellationToken);
 }
@@ -44,6 +52,8 @@ public sealed class ThemeService(
 
     public string CurrentThemeId => host.CurrentThemeId;
 
+    public bool ReduceMotion => _settings.Settings.ReduceMotion;
+
     public string? TailscalePeerAddress => _settings.Settings.TailscalePeerAddress;
 
     public async Task<string?> InitializeAsync(CancellationToken cancellationToken)
@@ -51,7 +61,34 @@ public sealed class ThemeService(
         var load = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
         _settings = load.Document ?? SettingsDocument.Default;
         var themeId = Themes.Any(item => item.Id == _settings.Settings.ThemeId) ? _settings.Settings.ThemeId : "nova-dark";
-        return host.Apply(themeId) ? load.Warning : "The saved theme could not be applied; Nova Dark is active.";
+        if (!host.Apply(themeId)) return "The saved theme could not be applied; Nova Dark is active.";
+        if (!host.ApplyMotionPreference(_settings.Settings.ReduceMotion))
+            return "The saved motion preference could not be applied; standard motion is active.";
+        return load.Warning;
+    }
+
+    public async Task<string?> ConfigureReduceMotionAsync(bool reduceMotion, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var previous = _settings.Settings.ReduceMotion;
+            if (!host.ApplyMotionPreference(reduceMotion)) return "The motion preference could not be applied.";
+            var staged = _settings with { Settings = _settings.Settings with { ReduceMotion = reduceMotion } };
+            var save = await store.SaveAsync(staged, cancellationToken).ConfigureAwait(false);
+            if (save.Status != DocumentSaveStatus.Saved)
+            {
+                host.ApplyMotionPreference(previous);
+                return save.Error ?? "Motion preference persistence failed; the previous preference was restored.";
+            }
+
+            _settings = staged;
+            return null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public async Task<string?> ApplyAsync(string themeId, CancellationToken cancellationToken)

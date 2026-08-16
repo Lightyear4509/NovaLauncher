@@ -73,8 +73,17 @@ public sealed partial class MainWindow : Window
 
     private void OnShowSettings(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => ViewModel.Workspace!.NavigateTo("Settings");
 
+    private void OnNavigateBack(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateBack();
+
+    private void OnNavigateForward(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateForward();
+
+    private void OnToggleNavigation(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.ToggleNavigation();
+
     private async void OnApplyTheme(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
         await ExecuteAsync(() => ViewModel.Workspace!.ApplySelectedThemeAsync(_lifetimeCancellation.Token));
+
+    private async void OnApplyMotionPreference(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.ApplyMotionPreferenceAsync(_lifetimeCancellation.Token));
 
     private void OnApplySteamGridDbKey(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
         ViewModel.Workspace!.ApplySteamGridDbApiKey();

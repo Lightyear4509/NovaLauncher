@@ -25,6 +25,26 @@ public sealed class LibraryWorkspaceViewModelTests
         fixture.Workspace.NavigateTo("Unknown");
         Assert.True(fixture.Workspace.IsSavesPage);
     }
+
+    [Fact]
+    public void NavigationHistoryAndCompactModeRemainDeterministic()
+    {
+        using var fixture = new WorkspaceFixture();
+        fixture.Workspace.NavigateTo("Library");
+        fixture.Workspace.NavigateTo("Saves");
+
+        Assert.True(fixture.Workspace.CanNavigateBack);
+        fixture.Workspace.NavigateBack();
+        Assert.True(fixture.Workspace.IsLibraryPage);
+        Assert.True(fixture.Workspace.CanNavigateForward);
+        fixture.Workspace.NavigateForward();
+        Assert.True(fixture.Workspace.IsSavesPage);
+
+        fixture.Workspace.ToggleNavigation();
+        Assert.True(fixture.Workspace.IsNavigationCompact);
+        Assert.Equal(82, fixture.Workspace.NavigationPaneWidth);
+        Assert.Equal("⌂", fixture.Workspace.HomeNavigationLabel);
+    }
     private static readonly string[] PreservedArguments = ["--profile My Profile", "--fullscreen"];
 
     [Fact]
@@ -296,9 +316,15 @@ public sealed class LibraryWorkspaceViewModelTests
     {
         public IReadOnlyList<ThemeOption> Themes { get; } = [new("nova-dark", "Nova Dark")];
         public string CurrentThemeId => "nova-dark";
+        public bool ReduceMotion { get; private set; }
         public string? TailscalePeerAddress => null;
         public Task<string?> InitializeAsync(CancellationToken cancellationToken) => Task.FromResult<string?>(null);
         public Task<string?> ApplyAsync(string themeId, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+        public Task<string?> ConfigureReduceMotionAsync(bool reduceMotion, CancellationToken cancellationToken)
+        {
+            ReduceMotion = reduceMotion;
+            return Task.FromResult<string?>(null);
+        }
         public Task<string?> ConfigureTailscalePeerAsync(string address, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
     }
 

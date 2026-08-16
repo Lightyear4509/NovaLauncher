@@ -42,6 +42,23 @@ public sealed class ThemeServiceTests
     }
 
     [Fact]
+    public async Task MotionPreferenceLoadsPersistsAndRollsBackOnSaveFailure()
+    {
+        var host = new Host();
+        var store = new Store(new SettingsDocument(1, LauncherSettings.Default with { ReduceMotion = true }));
+        using var service = new ThemeService(host, store);
+
+        Assert.Null(await service.InitializeAsync(CancellationToken.None));
+        Assert.True(host.ReduceMotion);
+        Assert.True(service.ReduceMotion);
+
+        store.FailSave = true;
+        Assert.NotNull(await service.ConfigureReduceMotionAsync(false, CancellationToken.None));
+        Assert.True(host.ReduceMotion);
+        Assert.True(store.Value!.Settings.ReduceMotion);
+    }
+
+    [Fact]
     public async Task UnknownThemeAndCancellationAreRejected()
     {
         var host = new Host();
@@ -78,7 +95,9 @@ public sealed class ThemeServiceTests
     private sealed class Host : IThemeHost
     {
         public string CurrentThemeId { get; private set; } = "nova-dark";
+        public bool ReduceMotion { get; private set; }
         public bool Apply(string themeId) { CurrentThemeId = themeId; return true; }
+        public bool ApplyMotionPreference(bool reduceMotion) { ReduceMotion = reduceMotion; return true; }
     }
 
     private sealed class Store(SettingsDocument initial) : IDocumentStore<SettingsDocument>

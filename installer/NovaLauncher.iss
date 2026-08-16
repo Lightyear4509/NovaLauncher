@@ -1,5 +1,5 @@
 #define AppName "NovaLauncher"
-#define AppVersion "0.1.0-alpha.1"
+#define AppVersion "0.2.0-alpha.1"
 #define AppPublisher "NovaLauncher Contributors"
 
 [Setup]
@@ -11,7 +11,7 @@ AppPublisher={#AppPublisher}
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription={#AppName} unsigned alpha preview installer
 VersionInfoProductName={#AppName}
-VersionInfoProductVersion=0.1.0.1
+VersionInfoProductVersion=0.2.0.1
 DefaultDirName={localappdata}\Programs\NovaLauncher
 DefaultGroupName=NovaLauncher
 PrivilegesRequired=lowest
@@ -19,7 +19,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\artifacts\release
-OutputBaseFilename=NovaLauncher-Setup-0.1.0-alpha.1-win-x64
+OutputBaseFilename=NovaLauncher-Setup-0.2.0-alpha.1-win-x64
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern dynamic

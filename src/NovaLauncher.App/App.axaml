@@ -10,9 +10,16 @@
     <SolidColorBrush x:Key="ThemeText" Color="#F7F8FC" />
     <SolidColorBrush x:Key="ThemeMuted" Color="#B8C1DF" />
     <SolidColorBrush x:Key="ThemeAccent" Color="#63D8FF" />
+    <SolidColorBrush x:Key="ThemeAccentSecondary" Color="#9B6DFF" />
+    <SolidColorBrush x:Key="ThemeSuccess" Color="#54D89B" />
+    <SolidColorBrush x:Key="ThemeWarning" Color="#F4BF58" />
+    <SolidColorBrush x:Key="ThemeDanger" Color="#FF6B7A" />
+    <SolidColorBrush x:Key="ThemeOverlay" Color="#D90B1020" />
+    <SolidColorBrush x:Key="ThemeNavSelected" Color="#263E72" />
     <SolidColorBrush x:Key="ThemeButton" Color="#253760" />
     <SolidColorBrush x:Key="ThemeButtonHover" Color="#36558C" />
     <SolidColorBrush x:Key="ThemeButtonPressed" Color="#182A50" />
+    <x:TimeSpan x:Key="MotionDuration">0:0:0.16</x:TimeSpan>
     <x:String x:Key="NavHome">⌂  _Home</x:String>
     <x:String x:Key="NavLibrary">▦  _Library</x:String>
     <x:String x:Key="NavSaves">⇅  _Saves</x:String>
@@ -26,15 +33,17 @@
       <Setter Property="FontFamily" Value="avares://Avalonia.Fonts.Inter/Assets#Inter" />
     </Style>
     <Style Selector="Button">
-      <Setter Property="MinHeight" Value="40" />
-      <Setter Property="Padding" Value="18,8" />
+      <Setter Property="MinHeight" Value="42" />
+      <Setter Property="Padding" Value="18,9" />
       <Setter Property="Background" Value="{DynamicResource ThemeButton}" />
       <Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
       <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
       <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="Opacity" Value="1" />
       <Setter Property="Transitions">
-        <Transitions><BrushTransition Property="Background" Duration="0:0:0.14" /></Transitions>
+        <Transitions><BrushTransition Property="Background" Duration="{DynamicResource MotionDuration}" /></Transitions>
       </Setter>
     </Style>
     <Style Selector="Button:pointerover /template/ ContentPresenter">
@@ -42,6 +51,99 @@
     </Style>
     <Style Selector="Button:pressed /template/ ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource ThemeButtonPressed}" />
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="{DynamicResource ThemeAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeAccent}" />
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ThemeAccentSecondary}" />
+    </Style>
+    <Style Selector="Button.subtle">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.nav">
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="MinHeight" Value="48" />
+      <Setter Property="Padding" Value="16,11" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.game-card">
+      <Setter Property="CornerRadius" Value="16" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="BorderBrush" Duration="{DynamicResource MotionDuration}" />
+          <DoubleTransition Property="Opacity" Duration="{DynamicResource MotionDuration}" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.game-card:pointerover">
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeAccent}" />
+      <Setter Property="Opacity" Value="0.94" />
+    </Style>
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource ThemeSurface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="16" />
+      <Setter Property="Padding" Value="24" />
+    </Style>
+    <Style Selector="Border.elevated-card">
+      <Setter Property="Background" Value="{DynamicResource ThemeElevated}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="18" />
+      <Setter Property="Padding" Value="24" />
+    </Style>
+    <Style Selector="Border.dialog">
+      <Setter Property="Background" Value="{DynamicResource ThemeElevated}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeAccent}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="18" />
+      <Setter Property="Padding" Value="24" />
+    </Style>
+    <Style Selector="Border.toast">
+      <Setter Property="Background" Value="{DynamicResource ThemeOverlay}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="14,10" />
+    </Style>
+    <Style Selector="Border.empty-state">
+      <Setter Property="Background" Value="{DynamicResource ThemeSurface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="18" />
+      <Setter Property="Padding" Value="34" />
+    </Style>
+    <Style Selector="ProgressBar">
+      <Setter Property="MinHeight" Value="6" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeAccent}" />
+      <Setter Property="Background" Value="{DynamicResource ThemeElevated}" />
+    </Style>
+    <Style Selector="ToolTip">
+      <Setter Property="Background" Value="{DynamicResource ThemeOverlay}" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="10,7" />
+    </Style>
+    <Style Selector="TextBlock.page-title">
+      <Setter Property="FontSize" Value="36" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="LetterSpacing" Value="-0.5" />
+    </Style>
+    <Style Selector="TextBlock.eyebrow">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeAccent}" />
+      <Setter Property="LetterSpacing" Value="1.4" />
     </Style>
   </Application.Styles>
 </Application>
