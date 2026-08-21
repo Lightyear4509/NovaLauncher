@@ -19,10 +19,12 @@ public sealed class TailscaleTcpTransportTests
         var secret = RandomNumberGenerator.GetBytes(32);
         var idA = Guid.NewGuid();
         var idB = Guid.NewGuid();
-        var settingsA = new SaveSyncSettings(idA, "A", IPAddress.Loopback.ToString(), null, portB, []);
-        var settingsB = new SaveSyncSettings(idB, "B", IPAddress.Loopback.ToString(), null, portA, []);
-        await using var a = new TailscaleTcpTransport(() => settingsA, new Secret(secret), IPAddress.Loopback, portA);
-        await using var b = new TailscaleTcpTransport(() => settingsB, new Secret(secret), IPAddress.Loopback, portB);
+        var credentialA = new Secret(secret);
+        var credentialB = new Secret(secret);
+        var settingsA = Settings(idA, "A", idB, portB, credentialA);
+        var settingsB = Settings(idB, "B", idA, portA, credentialB);
+        await using var a = new TailscaleTcpTransport(() => settingsA, credentialA, IPAddress.Loopback, portA, credentialA);
+        await using var b = new TailscaleTcpTransport(() => settingsB, credentialB, IPAddress.Loopback, portB, credentialB);
         var endpointA = new Endpoint(idB);
         var endpointB = new Endpoint(idA);
         await a.StartAsync(endpointA, CancellationToken.None);
@@ -42,10 +44,14 @@ public sealed class TailscaleTcpTransportTests
         var portA = FreePort();
         var portB = FreePort();
         while (portB == portA) portB = FreePort();
-        var settingsA = new SaveSyncSettings(Guid.NewGuid(), "A", "127.0.0.1", null, portB, []);
-        var settingsB = new SaveSyncSettings(Guid.NewGuid(), "B", "127.0.0.1", null, portA, []);
-        await using var a = new TailscaleTcpTransport(() => settingsA, new Secret(RandomNumberGenerator.GetBytes(32)), IPAddress.Loopback, portA);
-        await using var b = new TailscaleTcpTransport(() => settingsB, new Secret(RandomNumberGenerator.GetBytes(32)), IPAddress.Loopback, portB);
+        var credentialA = new Secret(RandomNumberGenerator.GetBytes(32));
+        var credentialB = new Secret(RandomNumberGenerator.GetBytes(32));
+        var idA = Guid.NewGuid();
+        var idB = Guid.NewGuid();
+        var settingsA = Settings(idA, "A", idB, portB, credentialA);
+        var settingsB = Settings(idB, "B", idA, portA, credentialB);
+        await using var a = new TailscaleTcpTransport(() => settingsA, credentialA, IPAddress.Loopback, portA, credentialA);
+        await using var b = new TailscaleTcpTransport(() => settingsB, credentialB, IPAddress.Loopback, portB, credentialB);
         var endpoint = new Endpoint(settingsA.DeviceId);
         await a.StartAsync(new Endpoint(settingsB.DeviceId), CancellationToken.None);
         await b.StartAsync(endpoint, CancellationToken.None);
@@ -92,8 +98,23 @@ public sealed class TailscaleTcpTransportTests
         return new(manifest, new Dictionary<string, byte[]> { ["slot.sav"] = bytes });
     }
 
+    private static SaveSyncSettings Settings(Guid localId, string name, Guid peerId, int port, Secret credential) =>
+        new(localId, name, "127.0.0.1", peerId, port, [], TrustedPeers:
+            [new(peerId, $"Peer {name}", "127.0.0.1", credential.GetCredentialReference(peerId), TrustedPeerState.Active, DateTimeOffset.UtcNow)]);
+
     private static int FreePort() { var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop(); return port; }
-    private sealed class Secret(byte[] value) : IPairingSecretStore { public bool HasSecret => true; public byte[]? GetSecret() => value.ToArray(); public void SetSecret(ReadOnlySpan<byte> secret) { } public void Clear() { } }
+    private sealed class Secret(byte[] value) : IPairingSecretStore, IPeerCredentialStore
+    {
+        public bool HasSecret => value.Length == 32;
+        public byte[]? GetSecret() => value.ToArray();
+        public void SetSecret(ReadOnlySpan<byte> secret) => value = secret.ToArray();
+        public void Clear() => value = [];
+        public bool ContainsSecret(Guid peerDeviceId) => value.Length == 32;
+        public byte[]? GetSecret(Guid peerDeviceId) => GetSecret();
+        public void SetSecret(Guid peerDeviceId, ReadOnlySpan<byte> secret) => SetSecret(secret);
+        public void Clear(Guid peerDeviceId) => Clear();
+        public string GetCredentialReference(Guid peerDeviceId) => $"test/{peerDeviceId:N}";
+    }
     private sealed class Endpoint(Guid expected) : ISaveSyncPeerEndpoint
     {
         public SaveSnapshotPayload? Received { get; private set; }

@@ -302,6 +302,23 @@ public sealed class SaveSyncDocumentPolicy : IDocumentPolicy<SaveSyncDocument>
         if (settings.PeerAddress is { Length: > 0 } peer &&
             !NovaLauncher.Application.SaveSync.TailscalePeerValidator.TryNormalize(peer, out _, out _))
             return "The save-sync peer is not a Tailscale address.";
+        var trustedPeers = settings.EffectiveTrustedPeers;
+        if (trustedPeers.Count > NovaLauncher.Domain.SaveSync.SaveSyncSettings.MaximumTrustedPeers ||
+            trustedPeers.Select(static trusted => trusted.DeviceId).Distinct().Count() != trustedPeers.Count ||
+            trustedPeers.Select(static trusted => trusted.CredentialReference).Distinct(StringComparer.Ordinal).Count() != trustedPeers.Count)
+            return "Trusted save-sync peers are excessive or duplicated.";
+        foreach (var trusted in trustedPeers)
+        {
+            if (trusted.DeviceId == Guid.Empty || trusted.DeviceId == settings.DeviceId ||
+                string.IsNullOrWhiteSpace(trusted.DisplayName) || trusted.DisplayName.Length > 100 ||
+                string.IsNullOrWhiteSpace(trusted.CredentialReference) || trusted.CredentialReference.Length > 200 ||
+                trusted.CredentialReference.Any(char.IsControl) ||
+                !NovaLauncher.Application.SaveSync.TailscalePeerValidator.TryNormalize(trusted.Address, out var normalizedAddress, out _) ||
+                !string.Equals(trusted.Address, normalizedAddress, StringComparison.Ordinal) ||
+                !Enum.IsDefined(trusted.State) || trusted.PairedAtUtc > DateTimeOffset.UtcNow.AddDays(1) ||
+                trusted.LastSeenAtUtc is { } lastSeen && (lastSeen < trusted.PairedAtUtc || lastSeen > DateTimeOffset.UtcNow.AddDays(1)))
+                return "A trusted save-sync peer is invalid.";
+        }
         if (settings.Games.Count > 10_000 || settings.Games.Select(static game => game.GameId).Distinct().Count() != settings.Games.Count)
             return "Save-sync game state is excessive or duplicated.";
         foreach (var game in settings.Games)

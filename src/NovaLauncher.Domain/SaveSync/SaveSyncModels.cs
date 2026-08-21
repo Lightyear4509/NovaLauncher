@@ -20,6 +20,22 @@ public sealed record SaveSyncGameState(
     string Status,
     string? ConflictSnapshotId = null);
 
+public enum TrustedPeerState
+{
+    Active,
+    Paused,
+    Revoked,
+}
+
+public sealed record TrustedSaveSyncPeer(
+    Guid DeviceId,
+    string DisplayName,
+    string Address,
+    string CredentialReference,
+    TrustedPeerState State,
+    DateTimeOffset PairedAtUtc,
+    DateTimeOffset? LastSeenAtUtc = null);
+
 public sealed record SaveSyncSettings(
     Guid DeviceId,
     string DeviceName,
@@ -32,9 +48,13 @@ public sealed record SaveSyncSettings(
     Guid? LastConsumedInvitationId = null,
     string? PendingCodeSalt = null,
     string? PendingCodeHash = null,
-    int PendingCodeFailedAttempts = 0)
+    int PendingCodeFailedAttempts = 0,
+    IReadOnlyList<TrustedSaveSyncPeer>? TrustedPeers = null)
 {
     public const int DefaultPort = 47471;
+    public const int MaximumTrustedPeers = 8;
+
+    public IReadOnlyList<TrustedSaveSyncPeer> EffectiveTrustedPeers => TrustedPeers ?? [];
 
     public static SaveSyncSettings CreateDefault() =>
         new(Guid.NewGuid(), Environment.MachineName, null, null, DefaultPort, []);

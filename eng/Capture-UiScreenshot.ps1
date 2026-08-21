@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$OutputPath,
     [string]$Configuration = 'Release',
+    [string]$ExecutablePath,
     [int]$TimeoutSeconds = 20
 )
 
@@ -9,7 +10,10 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $dotnet = Join-Path $root '.dotnet\dotnet.exe'
 $assembly = Join-Path $root "src\NovaLauncher.App\bin\$Configuration\net10.0\NovaLauncher.App.dll"
 if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) { throw "Pinned .NET SDK is missing at: $dotnet" }
-if (-not (Test-Path -LiteralPath $assembly -PathType Leaf)) { throw "Build NovaLauncher before capturing the UI: $assembly" }
+if ([string]::IsNullOrWhiteSpace($ExecutablePath) -and -not (Test-Path -LiteralPath $assembly -PathType Leaf)) { throw "Build NovaLauncher before capturing the UI: $assembly" }
+$launchPath = if ([string]::IsNullOrWhiteSpace($ExecutablePath)) { $dotnet } else { [IO.Path]::GetFullPath($ExecutablePath) }
+if (-not (Test-Path -LiteralPath $launchPath -PathType Leaf)) { throw "The capture executable does not exist: $launchPath" }
+$launchArguments = if ([string]::IsNullOrWhiteSpace($ExecutablePath)) { @($assembly, '--smoke-test') } else { @('--smoke-test') }
 
 $resolvedOutput = [IO.Path]::GetFullPath($OutputPath)
 $outputDirectory = Split-Path -Parent $resolvedOutput
@@ -30,7 +34,7 @@ public static class NovaWindowCapture {
 
 $process = $null
 try {
-    $process = Start-Process -FilePath $dotnet -ArgumentList @($assembly) -WorkingDirectory (Split-Path -Parent $assembly) -WindowStyle Hidden -PassThru
+    $process = Start-Process -FilePath $launchPath -ArgumentList $launchArguments -WorkingDirectory (Split-Path -Parent $launchPath) -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     $handle = [IntPtr]::Zero
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -41,6 +45,7 @@ try {
         if ($handle -ne [IntPtr]::Zero -and $process.Responding) { break }
     }
     if ($handle -eq [IntPtr]::Zero) { throw 'NovaLauncher did not expose a responsive window before the capture timeout.' }
+    [void](New-Object -ComObject WScript.Shell).AppActivate($process.Id)
     Start-Sleep -Milliseconds 700
     $rect = [NovaWindowCapture+Rect]::new()
     if (-not [NovaWindowCapture]::GetWindowRect($handle, [ref]$rect)) { throw 'Could not read the NovaLauncher window bounds.' }

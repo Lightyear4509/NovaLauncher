@@ -10,6 +10,8 @@
     xmlns:achievements="using:NovaLauncher.Domain.Achievements"
     xmlns:themes="using:NovaLauncher.Application.Themes"
     xmlns:enrichment="using:NovaLauncher.Application.Enrichment"
+    xmlns:saves="using:NovaLauncher.Application.SaveSync"
+    xmlns:syncDomain="using:NovaLauncher.Domain.SaveSync"
     xmlns:vm="using:NovaLauncher.Application"
     x:DataType="vm:MainWindowViewModel"
     Title="NovaLauncher"
@@ -361,6 +363,41 @@
                     <Button Content="Use remote" Click="OnKeepRemoteSave" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Resolve save conflict by restoring remote files" />
                     <Button Content="Keep both" Click="OnKeepBothSaves" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Resolve save conflict by retaining both versions" />
                   </WrapPanel>
+                  <TextBlock Text="Snapshot history" FontWeight="SemiBold" Margin="0,6,0,0" />
+                  <TextBlock Text="Snapshots are integrity-checked and retained locally. Restoring creates a backup of the current folder first." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+                  <ListBox ItemsSource="{Binding Workspace.SaveSnapshotHistory}" SelectedItem="{Binding Workspace.SelectedSaveSnapshot}" MaxHeight="220" AutomationProperties.Name="Retained save snapshot history">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="saves:SaveSnapshotHistoryItem">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="0,4">
+                          <StackPanel>
+                            <TextBlock Text="{Binding CreatedAtUtc, StringFormat='{}{0:g}'}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding SnapshotId}" FontSize="11" Foreground="{DynamicResource ThemeMuted}" />
+                            <TextBlock Text="{Binding Error}" IsVisible="{Binding !IntegrityValid}" TextWrapping="Wrap" Foreground="#E56565" />
+                          </StackPanel>
+                          <StackPanel Grid.Column="1">
+                            <TextBlock Text="{Binding FileCount, StringFormat='{}{0} files'}" />
+                            <TextBlock Text="{Binding IntegrityValid, StringFormat='Integrity: {0}'}" />
+                          </StackPanel>
+                        </Grid>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <WrapPanel ItemSpacing="8">
+                    <Button Content="Refresh history" Click="OnRefreshSnapshotHistory" AutomationProperties.Name="Refresh selected game save snapshot history" />
+                    <Button Content="Restore selected snapshot" Click="OnRestoreSelectedSnapshot" IsEnabled="{Binding Workspace.CanRestoreSelectedSnapshot}" AutomationProperties.Name="Restore selected verified save snapshot" />
+                  </WrapPanel>
+                  <TextBlock Text="Restore history" FontWeight="SemiBold" Margin="0,6,0,0" />
+                  <ItemsControl ItemsSource="{Binding Workspace.SaveRestoreHistory}" AutomationProperties.Name="Bounded save restore history">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="saves:SaveRestoreHistoryItem">
+                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10" Margin="4">
+                          <TextBlock Text="{Binding CreatedAtUtc, StringFormat='{}{0:g}'}" />
+                          <TextBlock Grid.Column="1" Text="{Binding Outcome}" />
+                          <TextBlock Grid.Column="2" Text="{Binding BackedUpFileCount, StringFormat='{}{0} files'}" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                 </StackPanel>
               </Border>
               <TextBlock Text="About" FontSize="22" FontWeight="Bold" />
@@ -587,6 +624,26 @@
                 <Button Content="Revoke paired device" Click="OnRevokePairedDevice" AutomationProperties.Name="Revoke the paired save-sync device" />
               </WrapPanel>
               <TextBlock Text="Accept invitation becomes available after the other device's Tailscale IP is entered and the invitation field contains six digits." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+              <TextBlock Text="Trusted devices" FontSize="18" FontWeight="SemiBold" Margin="0,8,0,0" />
+              <ListBox ItemsSource="{Binding Workspace.TrustedSaveSyncPeers}" SelectedItem="{Binding Workspace.SelectedTrustedPeer}" MaxHeight="180" AutomationProperties.Name="Independently trusted save-sync devices">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="syncDomain:TrustedSaveSyncPeer">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="4">
+                      <StackPanel>
+                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Address}" FontSize="11" Foreground="{DynamicResource ThemeMuted}" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="1" Text="{Binding State}" VerticalAlignment="Center" />
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <TextBox Text="{Binding Workspace.TrustedPeerName}" IsEnabled="{Binding Workspace.HasSelectedTrustedPeer}" PlaceholderText="Trusted device name" AutomationProperties.Name="Selected trusted device name" />
+              <WrapPanel ItemSpacing="8">
+                <Button Content="Rename selected" Click="OnRenameTrustedPeer" IsEnabled="{Binding Workspace.HasSelectedTrustedPeer}" AutomationProperties.Name="Rename selected trusted device" />
+                <Button Content="Pause or resume" Click="OnToggleTrustedPeer" IsEnabled="{Binding Workspace.HasSelectedTrustedPeer}" AutomationProperties.Name="Pause or resume selected trusted device" />
+                <Button Content="Revoke selected" Click="OnRevokeTrustedPeer" IsEnabled="{Binding Workspace.HasSelectedTrustedPeer}" AutomationProperties.Name="Independently revoke selected trusted device" />
+              </WrapPanel>
               <TextBlock Text="Steam-imported games are excluded and continue to use Steam Cloud where supported." TextWrapping="Wrap" />
             </StackPanel>
           </Border>
