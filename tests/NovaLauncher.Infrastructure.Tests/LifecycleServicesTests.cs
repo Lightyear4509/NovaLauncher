@@ -17,7 +17,7 @@ public sealed class LifecycleServicesTests : IDisposable
     {
         var installer = new byte[] { 1, 2, 3 }; var handler = new RoutingHandler();
         handler.AddJson("api.github.com", ReleasesJson("v0.6.0-beta.1", true, installer.Length));
-        var service = new GitHubUpdateService(new HttpClient(handler), new FakeAuthenticode(true), Path.Combine(_root, "stage"), new HashSet<string> { new('a', 64) });
+        var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage", hasPin: true);
 
         var stable = await service.CheckAsync(UpdateChannel.Stable, CancellationToken.None);
         var beta = await service.CheckAsync(UpdateChannel.Beta, CancellationToken.None);
@@ -29,7 +29,7 @@ public sealed class LifecycleServicesTests : IDisposable
     [Fact]
     public async Task UnsignedBuildFailsClosedBeforeDownloadingInstaller()
     {
-        var handler = new RoutingHandler(); var service = new GitHubUpdateService(new HttpClient(handler), new FakeAuthenticode(true), Path.Combine(_root, "stage"), new HashSet<string>());
+        var handler = new RoutingHandler(); var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage", hasPin: false);
         var release = Release(3);
 
         var result = await service.StageAsync(release, null, CancellationToken.None);
@@ -42,7 +42,7 @@ public sealed class LifecycleServicesTests : IDisposable
     {
         var installer = new byte[] { 1, 2, 3 }; var hash = Convert.ToHexString(SHA256.HashData(installer)).ToLowerInvariant(); var handler = new RoutingHandler();
         handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums", Encoding.ASCII.GetBytes($"{hash}  setup.exe\n")); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe", installer);
-        var service = new GitHubUpdateService(new HttpClient(handler), new FakeAuthenticode(true), Path.Combine(_root, "stage"), new HashSet<string> { new('a', 64) });
+        var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage", hasPin: true);
 
         var result = await service.StageAsync(Release(installer.Length), null, CancellationToken.None);
 
@@ -53,7 +53,7 @@ public sealed class LifecycleServicesTests : IDisposable
     public async Task HashMismatchLeavesNoStagedInstaller()
     {
         var handler = new RoutingHandler(); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums", Encoding.ASCII.GetBytes($"{new string('0', 64)}  setup.exe\n")); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe", [1, 2, 3]);
-        var service = new GitHubUpdateService(new HttpClient(handler), new FakeAuthenticode(true), Path.Combine(_root, "stage-bad"), new HashSet<string> { new('a', 64) });
+        var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage-bad", hasPin: true);
 
         var result = await service.StageAsync(Release(3), null, CancellationToken.None);
 
@@ -63,7 +63,7 @@ public sealed class LifecycleServicesTests : IDisposable
     [Fact]
     public async Task StageRejectsNonOfficialUrlBeforeNetworkAccess()
     {
-        var handler = new RoutingHandler(); var service = new GitHubUpdateService(new HttpClient(handler), new FakeAuthenticode(true), Path.Combine(_root, "stage-url"), new HashSet<string> { new('a', 64) });
+        var handler = new RoutingHandler(); var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage-url", hasPin: true);
         var release = Release(3) with { InstallerUri = new Uri("https://example.com/setup.exe") };
 
         var result = await service.StageAsync(release, null, CancellationToken.None);
@@ -76,11 +76,37 @@ public sealed class LifecycleServicesTests : IDisposable
     {
         var installer = new byte[] { 1, 2, 3 }; var hash = Convert.ToHexString(SHA256.HashData(installer)).ToLowerInvariant(); var handler = new RoutingHandler();
         handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums", Encoding.ASCII.GetBytes($"{hash}  setup.exe\n")); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe", installer);
-        var service = new GitHubUpdateService(new HttpClient(handler), new FakeAuthenticode(false), Path.Combine(_root, "stage-pin"), new HashSet<string> { new('a', 64) });
+        var service = CreateUpdateService(handler, new FakeAuthenticode(false), new FakeInstallerLauncher(), "stage-pin", hasPin: true);
 
         var result = await service.StageAsync(Release(3), null, CancellationToken.None);
 
         Assert.False(result.Success); Assert.Empty(Directory.GetFiles(Path.Combine(_root, "stage-pin")));
+    }
+
+    [Fact]
+    public async Task LaunchReverifiesHashAndSignatureImmediatelyBeforeExplicitHandoff()
+    {
+        var installer = new byte[] { 1, 2, 3 }; var hash = Convert.ToHexString(SHA256.HashData(installer)).ToLowerInvariant(); var handler = new RoutingHandler(); var launcher = new FakeInstallerLauncher();
+        handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums", Encoding.ASCII.GetBytes($"{hash}  setup.exe\n")); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe", installer);
+        var service = CreateUpdateService(handler, new FakeAuthenticode(true), launcher, "stage-launch", hasPin: true);
+        var staged = await service.StageAsync(Release(3), null, CancellationToken.None);
+
+        var result = await service.LaunchStagedAsync(Release(3), staged.StagedInstallerPath!, CancellationToken.None);
+
+        Assert.True(result.Success, result.Message); Assert.Equal(staged.StagedInstallerPath, launcher.LaunchedPath);
+    }
+
+    [Fact]
+    public async Task LaunchRefusesPostStageTamperingAndDoesNotExecute()
+    {
+        var installer = new byte[] { 1, 2, 3 }; var hash = Convert.ToHexString(SHA256.HashData(installer)).ToLowerInvariant(); var handler = new RoutingHandler(); var launcher = new FakeInstallerLauncher();
+        handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums", Encoding.ASCII.GetBytes($"{hash}  setup.exe\n")); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe", installer);
+        var service = CreateUpdateService(handler, new FakeAuthenticode(true), launcher, "stage-tamper", hasPin: true);
+        var staged = await service.StageAsync(Release(3), null, CancellationToken.None); await File.WriteAllBytesAsync(staged.StagedInstallerPath!, [9, 9, 9]);
+
+        var result = await service.LaunchStagedAsync(Release(3), staged.StagedInstallerPath!, CancellationToken.None);
+
+        Assert.False(result.Success); Assert.Null(launcher.LaunchedPath);
     }
 
     [Fact]
@@ -118,10 +144,12 @@ public sealed class LifecycleServicesTests : IDisposable
     }
 
     private static UpdateRelease Release(long size) => new("0.6.0", "v0.6.0", "notes", new("https://github.com/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe"), new("https://github.com/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums"), size, false);
+    private GitHubUpdateService CreateUpdateService(RoutingHandler handler, IAuthenticodeVerifier authenticode, IUpdateInstallerLauncher launcher, string stagingName, bool hasPin) => new(new HttpClient(handler), authenticode, launcher, Path.Combine(_root, stagingName), hasPin ? new HashSet<string> { new('a', 64) } : new HashSet<string>());
     private static string ReleasesJson(string tag, bool prerelease, long size) => $$"""[{"draft":false,"prerelease":{{prerelease.ToString().ToLowerInvariant()}},"tag_name":"{{tag}}","body":"notes","assets":[{"name":"NovaLauncher-Setup-0.6.0-win-x64.exe","size":{{size}},"browser_download_url":"https://github.com/Lightyear4509/NovaLauncher/releases/download/{{tag}}/NovaLauncher-Setup-0.6.0-win-x64.exe"},{"name":"SHA256SUMS.txt","size":100,"browser_download_url":"https://github.com/Lightyear4509/NovaLauncher/releases/download/{{tag}}/SHA256SUMS.txt"}]}]""";
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); GC.SuppressFinalize(this); }
 
     private sealed class FakeAuthenticode(bool trusted) : IAuthenticodeVerifier { public AuthenticodeVerification Verify(string path, IReadOnlySet<string> pins) => new(trusted, trusted ? "valid" : "invalid"); }
+    private sealed class FakeInstallerLauncher : IUpdateInstallerLauncher { public string? LaunchedPath { get; private set; } public bool Launch(string path) { LaunchedPath = path; return true; } }
     private sealed class RoutingHandler : HttpMessageHandler
     {
         private readonly Dictionary<string, byte[]> _responses = new(StringComparer.OrdinalIgnoreCase); public int RequestCount { get; private set; }

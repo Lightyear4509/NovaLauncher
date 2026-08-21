@@ -702,7 +702,9 @@
               <ProgressBar Minimum="0" Maximum="100" Value="{Binding Workspace.UpdateProgress}" Height="8" AutomationProperties.Name="Official update download progress" />
               <TextBlock Text="{Binding Workspace.UpdateStatus}" TextWrapping="Wrap" AutomationProperties.Name="Official update status" />
               <TextBlock Text="{Binding Workspace.AvailableUpdate.ReleaseNotes}" IsVisible="{Binding Workspace.HasAvailableUpdate}" MaxHeight="180" TextWrapping="Wrap" AutomationProperties.Name="Official update release notes" />
-              <TextBlock Text="Installation is never automatic. Unsigned builds without an embedded publisher-certificate pin fail closed and cannot stage an update." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+              <CheckBox Content="I reviewed the release notes and want Windows Setup to open the verified installer" IsChecked="{Binding Workspace.ConfirmUpdateInstall}" AutomationProperties.Name="Confirm launching verified NovaLauncher installer" />
+              <Button Content="Open verified installer" Click="OnLaunchStagedUpdate" IsEnabled="{Binding Workspace.CanLaunchStagedUpdate}" HorizontalAlignment="Left" AutomationProperties.Name="Open reverified NovaLauncher installer" />
+              <TextBlock Text="Installation is never automatic. The staged file is rechecked immediately before Windows Setup opens it. Unsigned builds without an embedded publisher-certificate pin fail closed." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
             </StackPanel>
           </Border>
           <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">

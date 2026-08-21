@@ -114,6 +114,8 @@ public sealed class LibraryWorkspaceViewModel(
     private UpdateRelease? _availableUpdate;
     private string _updateStatus = "Updates are checked only when you select Check for updates.";
     private double _updateProgress;
+    private string? _stagedUpdatePath;
+    private bool _confirmUpdateInstall;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -158,6 +160,8 @@ public sealed class LibraryWorkspaceViewModel(
     public bool HasAvailableUpdate => AvailableUpdate is not null;
     public string UpdateStatus { get => _updateStatus; private set => Set(ref _updateStatus, value); }
     public double UpdateProgress { get => _updateProgress; private set => Set(ref _updateProgress, value); }
+    public bool ConfirmUpdateInstall { get => _confirmUpdateInstall; set { if (Set(ref _confirmUpdateInstall, value)) OnPropertyChanged(nameof(CanLaunchStagedUpdate)); } }
+    public bool CanLaunchStagedUpdate => AvailableUpdate is not null && !string.IsNullOrWhiteSpace(_stagedUpdatePath) && ConfirmUpdateInstall;
     public string CrashRecoveryStatus => crashRecovery?.Message ?? "Crash recovery state is unavailable.";
 
     public TrustedSaveSyncPeer? SelectedTrustedPeer
@@ -284,7 +288,15 @@ public sealed class LibraryWorkspaceViewModel(
     {
         if (updates is null || AvailableUpdate is null) { UpdateStatus = "Check for a newer official release first."; return; }
         var progress = new Progress<double>(value => UpdateProgress = Math.Clamp(value * 100, 0, 100));
-        var result = await updates.StageAsync(AvailableUpdate, progress, cancellationToken).ConfigureAwait(false); UpdateStatus = result.Message;
+        var result = await updates.StageAsync(AvailableUpdate, progress, cancellationToken).ConfigureAwait(false);
+        _stagedUpdatePath = result.StagedInstallerPath; ConfirmUpdateInstall = false; OnPropertyChanged(nameof(CanLaunchStagedUpdate)); UpdateStatus = result.Message;
+    }
+
+    public async Task LaunchStagedUpdateAsync(CancellationToken cancellationToken)
+    {
+        if (updates is null || AvailableUpdate is null || string.IsNullOrWhiteSpace(_stagedUpdatePath) || !ConfirmUpdateInstall) { UpdateStatus = "Verify, stage, and explicitly confirm the installer first."; return; }
+        var result = await updates.LaunchStagedAsync(AvailableUpdate, _stagedUpdatePath, cancellationToken).ConfigureAwait(false); UpdateStatus = result.Message;
+        if (result.Success) ConfirmUpdateInstall = false;
     }
 
     public async Task ExportDiagnosticsAsync(string destination, CancellationToken cancellationToken)

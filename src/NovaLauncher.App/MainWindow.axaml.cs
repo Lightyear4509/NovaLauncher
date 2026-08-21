@@ -204,6 +204,9 @@ public sealed partial class MainWindow : Window
     private async void OnStageUpdate(object? sender, RoutedEventArgs e) =>
         await ExecuteAsync(() => ViewModel.Workspace!.StageAvailableUpdateAsync(_lifetimeCancellation.Token));
 
+    private async void OnLaunchStagedUpdate(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.LaunchStagedUpdateAsync(_lifetimeCancellation.Token));
+
     private async void OnExportDiagnostics(object? sender, RoutedEventArgs e)
     {
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions

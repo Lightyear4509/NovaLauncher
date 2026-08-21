@@ -5,7 +5,7 @@ using NovaLauncher.Domain;
 
 namespace NovaLauncher.Infrastructure.Lifecycle;
 
-public sealed class GitHubUpdateService(HttpClient http, IAuthenticodeVerifier authenticode, string stagingRoot, IReadOnlySet<string> trustedCertificateSha256) : IUpdateService
+public sealed class GitHubUpdateService(HttpClient http, IAuthenticodeVerifier authenticode, IUpdateInstallerLauncher installerLauncher, string stagingRoot, IReadOnlySet<string> trustedCertificateSha256) : IUpdateService
 {
     public const long MaximumMetadataBytes = 1024 * 1024;
     public const long MaximumInstallerBytes = 256L * 1024 * 1024;
@@ -59,6 +59,28 @@ public sealed class GitHubUpdateService(HttpClient http, IAuthenticodeVerifier a
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
+    public async Task<UpdateLaunchResult> LaunchStagedAsync(UpdateRelease release, string stagedInstallerPath, CancellationToken cancellationToken)
+    {
+        if (trustedCertificateSha256.Count == 0) return new(false, "Installer launch is disabled because this build has no trusted NovaLauncher signing-certificate pin.");
+        if (!IsOfficialAssetUri(release.InstallerUri) || !IsOfficialAssetUri(release.ChecksumsUri)) return new(false, "Installer launch refused a non-official release.");
+        try
+        {
+            var expectedPath = Path.GetFullPath(Path.Combine(stagingRoot, Path.GetFileName(release.InstallerUri.LocalPath)));
+            var actualPath = Path.GetFullPath(stagedInstallerPath);
+            if (!string.Equals(expectedPath, actualPath, StringComparison.OrdinalIgnoreCase) || !File.Exists(actualPath)) return new(false, "The selected installer is not the expected launcher-owned staged file.");
+            var info = new FileInfo(actualPath); if (info.Length != release.InstallerBytes) return new(false, "The staged installer size changed after verification.");
+            var sums = System.Text.Encoding.ASCII.GetString(await GetBoundedAsync(release.ChecksumsUri, MaximumMetadataBytes, null, cancellationToken).ConfigureAwait(false));
+            var expectedHash = ParseChecksum(sums, info.Name); var actualHash = await HashFileAsync(actualPath, cancellationToken).ConfigureAwait(false);
+            if (!CryptographicOperations.FixedTimeEquals(actualHash, Convert.FromHexString(expectedHash))) return new(false, "The staged installer hash changed after verification.");
+            var signature = authenticode.Verify(actualPath, trustedCertificateSha256); if (!signature.Trusted) return new(false, signature.Message);
+            return installerLauncher.Launch(actualPath)
+                ? new(true, "The verified installer was opened after explicit confirmation. Complete or cancel it in Windows Setup.")
+                : new(false, "Windows did not open the verified installer.");
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or InvalidDataException or CryptographicException or FormatException)
+        { return new(false, $"Installer handoff failed safely: {exception.Message}"); }
+    }
+
     private async Task<byte[]> GetBoundedAsync(Uri uri, long maximum, long? exact, CancellationToken token, IProgress<double>? progress = null)
     {
         using var response = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false); response.EnsureSuccessStatusCode();
@@ -82,6 +104,7 @@ public sealed class GitHubUpdateService(HttpClient http, IAuthenticodeVerifier a
         }
         await output.FlushAsync(token).ConfigureAwait(false); if (total != exactBytes) throw new InvalidDataException("Installer download ended before the declared size."); return hash.GetHashAndReset();
     }
+    private static async Task<byte[]> HashFileAsync(string path, CancellationToken token) { await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan); return await SHA256.HashDataAsync(stream, token).ConfigureAwait(false); }
     private static string ParseChecksum(string text, string fileName) => text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(static line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Where(static parts => parts.Length == 2).FirstOrDefault(parts => string.Equals(parts[1], fileName, StringComparison.Ordinal) && parts[0].Length == 64 && parts[0].All(Uri.IsHexDigit))?[0].ToLowerInvariant() ?? throw new InvalidDataException("The official checksum manifest does not contain the installer.");
     private static Uri RequireOfficialUri(JsonElement asset) { var value = asset.GetProperty("browser_download_url").GetString(); if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || !IsOfficialAssetUri(uri)) throw new InvalidDataException("Release metadata contained a non-official asset URL."); return uri; }
     private static bool IsOfficialAssetUri(Uri uri) => uri.Scheme == Uri.UriSchemeHttps && string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) && uri.AbsolutePath.StartsWith("/Lightyear4509/NovaLauncher/releases/download/", StringComparison.Ordinal);

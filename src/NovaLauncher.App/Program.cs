@@ -195,6 +195,7 @@ internal static class Program
             provider.GetRequiredService<IReceivedContentScanner>()));
         services.AddSingleton<IGameTransferService>(provider => provider.GetRequiredService<GameTransferCoordinator>());
         services.AddSingleton<IAuthenticodeVerifier, WindowsAuthenticodeVerifier>();
+        services.AddSingleton<IUpdateInstallerLauncher, ShellUpdateInstallerLauncher>();
         services.AddHttpClient("OfficialUpdates", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
@@ -211,6 +212,7 @@ internal static class Program
         services.AddSingleton<IUpdateService>(provider => new GitHubUpdateService(
             provider.GetRequiredService<IHttpClientFactory>().CreateClient("OfficialUpdates"),
             provider.GetRequiredService<IAuthenticodeVerifier>(),
+            provider.GetRequiredService<IUpdateInstallerLauncher>(),
             Path.Combine(dataRoot, "Updates", "Staging"),
             trustedPublisherPins));
         services.AddSingleton<IDiagnosticExportService>(_ => new SanitizedDiagnosticExportService(dataRoot, TimeProvider.System));
