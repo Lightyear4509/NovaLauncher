@@ -35,7 +35,8 @@ public static class DocumentStoreFactory
             fileSystem,
             new SettingsDocumentPolicy(),
             PersistenceJsonContext.Default.SettingsDocument,
-            timeProvider);
+            timeProvider,
+            new SettingsDocumentMigrator());
 
     public static IDocumentStore<AchievementsDocument> CreateAchievementsStore(
         string dataRoot,

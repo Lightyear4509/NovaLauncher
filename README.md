@@ -10,13 +10,13 @@ NovaLauncher does **not** download games or ROMs, bypass DRM, replace Steam, pro
 
 Download the latest build from [GitHub Releases](https://github.com/Lightyear4509/NovaLauncher/releases). For most users, choose:
 
-- `NovaLauncher-Setup-0.5.0-experimental.1-win-x64.exe` for the Windows installer.
-- `NovaLauncher-0.5.0-experimental.1-win-x64-portable.zip` if you prefer a portable copy.
+- `NovaLauncher-Setup-0.6.0-alpha.1-unsigned-win-x64.exe` for the Windows installer.
+- `NovaLauncher-0.6.0-alpha.1-unsigned-win-x64-portable.zip` if you prefer a portable copy.
 
-This alpha is currently **unsigned**. Windows may display **Unknown publisher** or a Microsoft Defender SmartScreen warning. Download `SHA256SUMS.txt` from the same release and verify the installer before opening it:
+This alpha is explicitly **unsigned**. Windows cannot authenticate its publisher and may display **Unknown publisher** or a Microsoft Defender SmartScreen warning. Automatic update installation and signed rollback are unavailable in this build. Download `SHA256SUMS.txt` from the same release and verify the installer before opening it:
 
 ```powershell
-Get-FileHash .\NovaLauncher-Setup-0.5.0-experimental.1-win-x64.exe -Algorithm SHA256
+Get-FileHash .\NovaLauncher-Setup-0.6.0-alpha.1-unsigned-win-x64.exe -Algorithm SHA256
 ```
 
 Compare the complete result with the installer entry in `SHA256SUMS.txt`. Do not run the file if the values differ, and do not disable Windows security protections globally.
@@ -180,11 +180,13 @@ NovaLauncher is local-first:
 - Pairing secrets are kept out of JSON, logs, exports, and release artifacts.
 - Online metadata and artwork requests occur only for configured supported providers.
 - Save synchronization is limited to folders you explicitly map and peers you explicitly pair.
-- Plugins, scripting, marketplaces, ROM acquisition, and downloaded-code execution are not supported.
+- Plugins, scripting, marketplaces, ROM acquisition, and general downloaded-code execution are not supported. The Phase 6 updater is narrowly limited to explicitly requested official releases and fails closed unless size, SHA-256, Authenticode trust, and an embedded publisher-certificate pin all validate; it never runs an installer automatically.
+
+See [Privacy](PRIVACY.md), [Security](SECURITY.md), and [Support](SUPPORT.md) for the public policies and reporting channels.
 
 ## Current release status
 
-`v0.5.0-experimental.1` adds explicit peer transfer of user-authorized manual DRM-free game folders. It rejects Steam/store-managed roots, uses authenticated bounded chunks, resumes verified staging, checks every SHA-256 hash, invokes Windows Security where available, and never launches received executables. This unsigned experimental prerelease is not production- or legal/security-qualified; physical multi-device interruption, disk exhaustion, firewall, accessibility, and independent review remain open.
+`v0.6.0-alpha.1-unsigned` adds explicit update discovery, bounded release metadata and downloads, local migration/recovery status, sanitized diagnostics, and tamper-resistant signed-update staging. Because this preview has no publisher certificate, update installation and signed rollback fail closed and remain unavailable. It also retains Phase 5's explicit peer transfer of user-authorized manual DRM-free game folders. This preview is not production- or legal/security-qualified; physical multi-device, installation lifecycle, accessibility, antivirus, and independent review remain open.
 
 Please use test data or maintain independent backups while evaluating experimental save synchronization.
 

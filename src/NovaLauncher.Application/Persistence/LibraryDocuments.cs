@@ -27,7 +27,7 @@ public sealed record SettingsDocument(
     int SchemaVersion,
     LauncherSettings Settings) : IVersionedDocument
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public static SettingsDocument Default { get; } = new(CurrentSchemaVersion, LauncherSettings.Default);
 }

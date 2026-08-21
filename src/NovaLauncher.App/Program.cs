@@ -21,6 +21,9 @@ using NovaLauncher.Application.SaveSync;
 using NovaLauncher.Application.GameTransfer;
 using NovaLauncher.Infrastructure.GameTransfer;
 using NovaLauncher.Infrastructure.SaveSync;
+using NovaLauncher.Application.Lifecycle;
+using NovaLauncher.Infrastructure.Lifecycle;
+using System.Reflection;
 
 namespace NovaLauncher.App;
 
@@ -43,6 +46,7 @@ internal static class Program
     {
         var smokeTest = args.Contains("--smoke-test", StringComparer.Ordinal);
         var steamImportDiagnostic = args.Contains("--steam-import-diagnostic", StringComparer.Ordinal);
+        var rollbackUpdate = args.Contains("--rollback-update", StringComparer.Ordinal);
         using var serviceProvider = ConfigureServices(smokeTest || steamImportDiagnostic);
         Services = serviceProvider;
 
@@ -53,10 +57,20 @@ internal static class Program
         {
             if (steamImportDiagnostic)
             {
-                return RunSteamImportDiagnosticAsync(serviceProvider).GetAwaiter().GetResult();
+                var diagnosticExitCode = RunSteamImportDiagnosticAsync(serviceProvider).GetAwaiter().GetResult();
+                if (diagnosticExitCode == 0) CompleteHealthySession(serviceProvider);
+                return diagnosticExitCode;
             }
 
-            return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            if (rollbackUpdate)
+            {
+                var rollback = serviceProvider.GetRequiredService<IUpdateRecoveryService>().LaunchRollbackAsync(CancellationToken.None).GetAwaiter().GetResult();
+                Console.WriteLine(rollback.Message); if (rollback.Success) CompleteHealthySession(serviceProvider); return rollback.Success ? 0 : 4;
+            }
+
+            var exitCode = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            if (exitCode == 0) CompleteHealthySession(serviceProvider);
+            return exitCode;
         }
         catch (Exception exception)
         {
@@ -187,6 +201,34 @@ internal static class Program
             dataRoot,
             provider.GetRequiredService<IReceivedContentScanner>()));
         services.AddSingleton<IGameTransferService>(provider => provider.GetRequiredService<GameTransferCoordinator>());
+        services.AddSingleton<IAuthenticodeVerifier, WindowsAuthenticodeVerifier>();
+        services.AddSingleton<IUpdateInstallerLauncher, ShellUpdateInstallerLauncher>();
+        services.AddHttpClient("OfficialUpdates", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd($"NovaLauncher/{NovaLauncher.Domain.ProductIdentity.Version}");
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+        });
+        var trustedPublisherPins = typeof(Program).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Where(static attribute => string.Equals(attribute.Key, "NovaLauncherUpdatePublisherSha256", StringComparison.Ordinal))
+            .Select(static attribute => attribute.Value ?? string.Empty)
+            .SelectMany(static value => value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(static pin => pin.ToLowerInvariant())
+            .Where(static pin => pin.Length == 64 && pin.All(Uri.IsHexDigit))
+            .ToHashSet(StringComparer.Ordinal);
+        services.AddSingleton<IUpdateRecoveryService>(provider => new UpdateRecoveryService(dataRoot, provider.GetRequiredService<IAuthenticodeVerifier>(), provider.GetRequiredService<IUpdateInstallerLauncher>(), trustedPublisherPins, TimeProvider.System));
+        services.AddSingleton<IUpdateService>(provider => new GitHubUpdateService(
+            provider.GetRequiredService<IHttpClientFactory>().CreateClient("OfficialUpdates"),
+            provider.GetRequiredService<IAuthenticodeVerifier>(),
+            provider.GetRequiredService<IUpdateInstallerLauncher>(),
+            provider.GetRequiredService<IUpdateRecoveryService>(),
+            Path.Combine(dataRoot, "Updates", "Staging"),
+            trustedPublisherPins));
+        services.AddSingleton<IDiagnosticExportService>(_ => new SanitizedDiagnosticExportService(dataRoot, TimeProvider.System));
+        var crashRecovery = new CrashRecoveryService(dataRoot, TimeProvider.System);
+        var recoveryState = crashRecovery.BeginSession();
+        services.AddSingleton<ICrashRecoveryService>(crashRecovery);
+        services.AddSingleton(recoveryState);
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IAtomicFileSystem, PhysicalAtomicFileSystem>();
         services.AddSingleton<IDocumentStore<GamesDocument>>(provider =>
@@ -231,5 +273,11 @@ internal static class Program
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
         provider.GetRequiredService<GameTransferCoordinator>().AttachEndpoint();
         return provider;
+    }
+
+    private static void CompleteHealthySession(IServiceProvider services)
+    {
+        services.GetRequiredService<ICrashRecoveryService>().CompleteSession();
+        services.GetRequiredService<IUpdateRecoveryService>().CompleteHealthySession();
     }
 }

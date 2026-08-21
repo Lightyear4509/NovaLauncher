@@ -1,16 +1,14 @@
-name: Build signed release artifacts
+name: Build unsigned preview artifacts
 
 on:
-  workflow_dispatch:
   push:
-    tags: ['v*']
+    tags: ['v*-unsigned']
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    if: ${{ !endsWith(github.ref_name, '-unsigned') }}
+  build-unsigned-preview:
     runs-on: windows-latest
     env:
       AVALONIA_TELEMETRY_OPTOUT: '1'
@@ -22,12 +20,20 @@ jobs:
           dotnet-version: 10.0.302
           cache: true
           cache-dependency-path: '**/packages.lock.json'
+      - name: Validate preview tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -ne 'v0.6.0-alpha.1-unsigned') {
+            throw "This source tree can only build v0.6.0-alpha.1-unsigned."
+          }
       - name: Restore locked dependencies
         run: dotnet restore NovaLauncher.sln --locked-mode
-      - name: Verify, build, and test
+      - name: Verify, build, test, and audit
         shell: pwsh
         run: |
           dotnet format NovaLauncher.sln --verify-no-changes --no-restore --severity warn
+          dotnet build NovaLauncher.sln -c Debug --no-restore
+          dotnet test NovaLauncher.sln -c Debug --no-build
           dotnet build NovaLauncher.sln -c Release --no-restore
           dotnet test NovaLauncher.sln -c Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults/Release
           dotnet list NovaLauncher.sln package --vulnerable --include-transitive
@@ -40,36 +46,17 @@ jobs:
           if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B\.V\.') { throw 'Invalid Inno Setup signature.' }
           $dir = Join-Path $PWD '.tools\InnoSetup'
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
-          $arguments = @(
-            '/PORTABLE=1'
-            '/VERYSILENT'
-            '/SUPPRESSMSGBOXES'
-            '/NORESTART'
-            "/DIR=`"$dir`""
-          )
+          $arguments = @('/PORTABLE=1','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=`"$dir`"")
           $process = Start-Process -FilePath (Join-Path $PWD 'inno.exe') -ArgumentList $arguments -Wait -PassThru
           if ($process.ExitCode -ne 0 -or -not (Test-Path (Join-Path $dir 'ISCC.exe') -PathType Leaf)) {
             throw "Inno Setup portable installation failed with exit code $($process.ExitCode)."
           }
-      - name: Build installer, portable ZIP, SBOM, and checksums
+      - name: Build and verify explicitly unsigned artifacts
         shell: pwsh
-        env:
-          NOVALAUNCHER_SIGNING_CERTIFICATE_BASE64: ${{ secrets.NOVALAUNCHER_SIGNING_CERTIFICATE_BASE64 }}
-          NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:NOVALAUNCHER_SIGNING_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD)) {
-            throw 'Phase 6 releases require the NovaLauncher code-signing certificate and password secrets.'
-          }
-          $certificatePath = Join-Path $env:RUNNER_TEMP 'novalauncher-signing.pfx'
-          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:NOVALAUNCHER_SIGNING_CERTIFICATE_BASE64))
-          try {
-            .\eng\Build-Release.ps1 -DotNetPath (Get-Command dotnet).Source -SigningCertificatePath $certificatePath -SigningCertificatePassword $env:NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD
-          } finally {
-            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
-          }
-      - name: Upload signed release candidates
+        run: .\eng\Build-UnsignedPreview.ps1 -DotNetPath (Get-Command dotnet).Source
+      - name: Upload unsigned preview candidates
         uses: actions/upload-artifact@v4
         with:
-          name: NovaLauncher-signed-release
+          name: NovaLauncher-v0.6.0-alpha.1-unsigned
           path: artifacts/release/*
           if-no-files-found: error

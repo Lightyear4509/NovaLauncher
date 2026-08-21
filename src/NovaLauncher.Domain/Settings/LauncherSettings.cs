@@ -11,7 +11,8 @@ public sealed record LauncherSettings(
     string LibrarySourceFilter = "All sources",
     string LibraryPlatformFilter = "All platforms",
     string LibraryAvailabilityFilter = "All games",
-    bool LibraryFavoritesOnly = false)
+    bool LibraryFavoritesOnly = false,
+    string UpdateChannel = "Stable")
 {
     public static LauncherSettings Default { get; } = new(
         "nova-dark",

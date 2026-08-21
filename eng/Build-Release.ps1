@@ -1,6 +1,8 @@
 param(
     [string]$Configuration = 'Release',
-    [string]$DotNetPath
+    [string]$DotNetPath,
+    [Parameter(Mandatory = $true)][string]$SigningCertificatePath,
+    [Parameter(Mandatory = $true)][string]$SigningCertificatePassword
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,6 +21,18 @@ if ($LASTEXITCODE -ne 0 -or $dotnetVersion -ne '10.0.302') {
     throw "Expected .NET SDK 10.0.302, but found '$dotnetVersion'."
 }
 if (-not (Test-Path $iscc)) { throw 'Verified Inno Setup compiler is missing.' }
+if (-not (Test-Path $SigningCertificatePath -PathType Leaf)) { throw 'The Phase 6 signing certificate is missing.' }
+$certificate = [System.Security.Cryptography.X509Certificates.X509CertificateLoader]::LoadPkcs12FromFile(
+    (Resolve-Path $SigningCertificatePath).Path,
+    $SigningCertificatePassword,
+    [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+try {
+    if (-not $certificate.HasPrivateKey) { throw 'The signing certificate does not contain a private key.' }
+    $publisherPin = $certificate.GetCertHashString([System.Security.Cryptography.HashAlgorithmName]::SHA256).ToLowerInvariant()
+} finally { $certificate.Dispose() }
+$signTool = Get-ChildItem (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin') -Filter signtool.exe -Recurse -File |
+    Where-Object FullName -Match '\\x64\\signtool\.exe$' | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+if ([string]::IsNullOrWhiteSpace($signTool)) { throw 'A Windows SDK x64 signtool.exe is required for Phase 6 packaging.' }
 
 foreach ($generatedPath in @($publish, $release)) {
     $expectedRoot = Join-Path $root 'artifacts'
@@ -28,21 +42,28 @@ foreach ($generatedPath in @($publish, $release)) {
     if (Test-Path $generatedPath) { Remove-Item -LiteralPath $generatedPath -Recurse -Force }
 }
 New-Item -ItemType Directory -Path $publish,$release -Force | Out-Null
-& $dotnet publish (Join-Path $root 'src\NovaLauncher.App\NovaLauncher.App.csproj') -c $Configuration -r win-x64 --self-contained true --no-restore -p:DebugType=None -p:DebugSymbols=false -o $publish
+& $dotnet publish (Join-Path $root 'src\NovaLauncher.App\NovaLauncher.App.csproj') -c $Configuration -r win-x64 --self-contained true --no-restore -p:DebugType=None -p:DebugSymbols=false -p:NovaLauncherUpdatePublisherSha256=$publisherPin -o $publish
 if ($LASTEXITCODE -ne 0) { throw 'Self-contained publish failed.' }
 Get-ChildItem -LiteralPath $publish -Recurse -Filter '*.pdb' | Remove-Item -Force
 Copy-Item (Join-Path $root 'LICENSE') $publish -Force
 Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $publish -Force
-Copy-Item (Join-Path $root 'installer\UNSIGNED-PREVIEW.txt') $publish -Force
+& $signTool sign /fd SHA256 /td SHA256 /tr 'http://timestamp.digicert.com' /f $SigningCertificatePath /p $SigningCertificatePassword (Join-Path $publish 'NovaLauncher.App.exe')
+if ($LASTEXITCODE -ne 0) { throw 'Application Authenticode signing failed.' }
+$appSignature = Get-AuthenticodeSignature (Join-Path $publish 'NovaLauncher.App.exe')
+if ($appSignature.Status -ne 'Valid') { throw "Signed application verification failed: $($appSignature.Status)." }
 
-$portable = Join-Path $release 'NovaLauncher-0.5.0-experimental.1-win-x64-portable.zip'
+$portable = Join-Path $release 'NovaLauncher-0.6.0-alpha.1-win-x64-portable.zip'
 if (Test-Path $portable) { Remove-Item -LiteralPath $portable -Force }
 Compress-Archive -Path (Join-Path $publish '*') -DestinationPath $portable -CompressionLevel Optimal
 
 & $iscc (Join-Path $root 'installer\NovaLauncher.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
+& $signTool sign /fd SHA256 /td SHA256 /tr 'http://timestamp.digicert.com' /f $SigningCertificatePath /p $SigningCertificatePassword (Join-Path $release 'NovaLauncher-Setup-0.6.0-alpha.1-win-x64.exe')
+if ($LASTEXITCODE -ne 0) { throw 'Installer Authenticode signing failed.' }
+$installerSignature = Get-AuthenticodeSignature (Join-Path $release 'NovaLauncher-Setup-0.6.0-alpha.1-win-x64.exe')
+if ($installerSignature.Status -ne 'Valid') { throw "Signed installer verification failed: $($installerSignature.Status)." }
 
-& (Join-Path $PSScriptRoot 'New-Sbom.ps1') -OutputPath (Join-Path $release 'NovaLauncher-0.5.0-experimental.1.cdx.json')
+& (Join-Path $PSScriptRoot 'New-Sbom.ps1') -OutputPath (Join-Path $release 'NovaLauncher-0.6.0-alpha.1.cdx.json')
 $artifacts = Get-ChildItem -LiteralPath $release -File | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object Name
 $lines = foreach ($artifact in $artifacts) {
     $hash = (Get-FileHash -LiteralPath $artifact.FullName -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -126,6 +126,9 @@
       <Setter Property="Foreground" Value="{DynamicResource ThemeAccent}" />
       <Setter Property="Background" Value="{DynamicResource ThemeElevated}" />
     </Style>
+    <Style Selector="CheckBox">
+      <Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
+    </Style>
     <Style Selector="ToolTip">
       <Setter Property="Background" Value="{DynamicResource ThemeOverlay}" />
       <Setter Property="Foreground" Value="{DynamicResource ThemeText}" />

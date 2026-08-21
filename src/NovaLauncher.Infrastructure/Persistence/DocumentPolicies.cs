@@ -257,7 +257,8 @@ public sealed class SettingsDocumentPolicy : IDocumentPolicy<SettingsDocument>
             settings.LibrarySort is not ("Name" or "Recently played" or "Date added" or "Playtime" or "Release date" or "Platform" or "Recently updated") ||
             settings.LibrarySourceFilter is not ("All sources" or "Manual" or "Steam") ||
             settings.LibraryPlatformFilter is not ("All platforms" or "Windows" or "Linux" or "macOS" or "Other") ||
-            settings.LibraryAvailabilityFilter is not ("All games" or "Available" or "Missing target"))
+            settings.LibraryAvailabilityFilter is not ("All games" or "Available" or "Missing target") ||
+            settings.UpdateChannel is not ("Stable" or "Beta" or "Alpha"))
         {
             return "The configured Library view preferences are invalid.";
         }
@@ -266,6 +267,16 @@ public sealed class SettingsDocumentPolicy : IDocumentPolicy<SettingsDocument>
             ? "The theme ID cannot exceed 100 characters."
             : null;
     }
+}
+
+public sealed class SettingsDocumentMigrator : IDocumentMigrator<SettingsDocument>
+{
+    public SettingsDocument? Migrate(SettingsDocument document) => document.SchemaVersion switch
+    {
+        1 => document with { SchemaVersion = SettingsDocument.CurrentSchemaVersion, Settings = document.Settings with { UpdateChannel = "Stable" } },
+        SettingsDocument.CurrentSchemaVersion => document,
+        _ => null,
+    };
 }
 
 public sealed class SaveSyncDocumentPolicy : IDocumentPolicy<SaveSyncDocument>

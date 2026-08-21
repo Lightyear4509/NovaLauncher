@@ -1,0 +1,205 @@
+using System.IO.Compression;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using NovaLauncher.Application.Lifecycle;
+using NovaLauncher.Application.Persistence;
+using NovaLauncher.Infrastructure.Lifecycle;
+
+namespace NovaLauncher.Infrastructure.Tests;
+
+public sealed class LifecycleServicesTests : IDisposable
+{
+    private readonly string _root = Path.Combine(Path.GetTempPath(), $"NovaLauncher-Lifecycle-{Guid.NewGuid():N}");
+
+    [Fact]
+    public async Task UpdateCheckAcceptsOnlyNewerOfficialChannelAsset()
+    {
+        var installer = new byte[] { 1, 2, 3 }; var handler = new RoutingHandler();
+        handler.AddJson("api.github.com", ReleasesJson("v0.6.0-beta.1", true, installer.Length));
+        var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage", hasPin: true);
+
+        var stable = await service.CheckAsync(UpdateChannel.Stable, CancellationToken.None);
+        var beta = await service.CheckAsync(UpdateChannel.Beta, CancellationToken.None);
+
+        Assert.Null(stable.Release);
+        Assert.Equal("v0.6.0-beta.1", Assert.IsType<UpdateRelease>(beta.Release).Tag);
+    }
+
+    [Fact]
+    public async Task UnsignedBuildFailsClosedBeforeDownloadingInstaller()
+    {
+        var handler = new RoutingHandler(); var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage", hasPin: false);
+        var release = Release(3);
+
+        var result = await service.StageAsync(release, null, CancellationToken.None);
+
+        Assert.False(result.Success); Assert.Contains("no trusted", result.Message, StringComparison.OrdinalIgnoreCase); Assert.Equal(0, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task StageRequiresExactHashAndPublisherPinBeforePromotion()
+    {
+        var installer = new byte[] { 1, 2, 3 }; var hash = Convert.ToHexString(SHA256.HashData(installer)).ToLowerInvariant(); var handler = new RoutingHandler();
+        handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums", Encoding.ASCII.GetBytes($"{hash}  setup.exe\n")); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe", installer);
+        var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage", hasPin: true);
+
+        var result = await service.StageAsync(Release(installer.Length), null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Message); Assert.Equal(installer, await File.ReadAllBytesAsync(result.StagedInstallerPath!));
+    }
+
+    [Fact]
+    public async Task HashMismatchLeavesNoStagedInstaller()
+    {
+        var handler = new RoutingHandler(); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums", Encoding.ASCII.GetBytes($"{new string('0', 64)}  setup.exe\n")); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe", [1, 2, 3]);
+        var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage-bad", hasPin: true);
+
+        var result = await service.StageAsync(Release(3), null, CancellationToken.None);
+
+        Assert.False(result.Success); Assert.Empty(Directory.GetFiles(Path.Combine(_root, "stage-bad")));
+    }
+
+    [Fact]
+    public async Task StageRejectsNonOfficialUrlBeforeNetworkAccess()
+    {
+        var handler = new RoutingHandler(); var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage-url", hasPin: true);
+        var release = Release(3) with { InstallerUri = new Uri("https://example.com/setup.exe") };
+
+        var result = await service.StageAsync(release, null, CancellationToken.None);
+
+        Assert.False(result.Success); Assert.Equal(0, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task PublisherPinFailureDiscardsVerifiedDownload()
+    {
+        var installer = new byte[] { 1, 2, 3 }; var hash = Convert.ToHexString(SHA256.HashData(installer)).ToLowerInvariant(); var handler = new RoutingHandler();
+        handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums", Encoding.ASCII.GetBytes($"{hash}  setup.exe\n")); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe", installer);
+        var service = CreateUpdateService(handler, new FakeAuthenticode(false), new FakeInstallerLauncher(), "stage-pin", hasPin: true);
+
+        var result = await service.StageAsync(Release(3), null, CancellationToken.None);
+
+        Assert.False(result.Success); Assert.Empty(Directory.GetFiles(Path.Combine(_root, "stage-pin")));
+    }
+
+    [Fact]
+    public async Task LaunchReverifiesHashAndSignatureImmediatelyBeforeExplicitHandoff()
+    {
+        var installer = new byte[] { 1, 2, 3 }; var hash = Convert.ToHexString(SHA256.HashData(installer)).ToLowerInvariant(); var handler = new RoutingHandler(); var launcher = new FakeInstallerLauncher();
+        handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums", Encoding.ASCII.GetBytes($"{hash}  setup.exe\n")); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe", installer);
+        var service = CreateUpdateService(handler, new FakeAuthenticode(true), launcher, "stage-launch", hasPin: true);
+        var staged = await service.StageAsync(Release(3), null, CancellationToken.None);
+
+        var result = await service.LaunchStagedAsync(Release(3), staged.StagedInstallerPath!, CancellationToken.None);
+
+        Assert.True(result.Success, result.Message); Assert.Equal(staged.StagedInstallerPath, launcher.LaunchedPath);
+    }
+
+    [Fact]
+    public async Task LaunchRefusesPostStageTamperingAndDoesNotExecute()
+    {
+        var installer = new byte[] { 1, 2, 3 }; var hash = Convert.ToHexString(SHA256.HashData(installer)).ToLowerInvariant(); var handler = new RoutingHandler(); var launcher = new FakeInstallerLauncher();
+        handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums", Encoding.ASCII.GetBytes($"{hash}  setup.exe\n")); handler.Add("github.com", "/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe", installer);
+        var service = CreateUpdateService(handler, new FakeAuthenticode(true), launcher, "stage-tamper", hasPin: true);
+        var staged = await service.StageAsync(Release(3), null, CancellationToken.None); await File.WriteAllBytesAsync(staged.StagedInstallerPath!, [9, 9, 9]);
+
+        var result = await service.LaunchStagedAsync(Release(3), staged.StagedInstallerPath!, CancellationToken.None);
+
+        Assert.False(result.Success); Assert.Null(launcher.LaunchedPath);
+    }
+
+    [Fact]
+    public void CrashMarkerReportsInterruptedSessionAndClearsOnCleanExit()
+    {
+        var first = new CrashRecoveryService(_root, TimeProvider.System); Assert.False(first.BeginSession().PreviousSessionInterrupted);
+        var second = new CrashRecoveryService(_root, TimeProvider.System); Assert.True(second.BeginSession().PreviousSessionInterrupted); second.CompleteSession();
+        Assert.False(new CrashRecoveryService(_root, TimeProvider.System).BeginSession().PreviousSessionInterrupted);
+    }
+
+    [Fact]
+    public async Task DiagnosticExportRedactsIdentifiersAddressesAndPaths()
+    {
+        var logs = Path.Combine(_root, "Logs"); Directory.CreateDirectory(logs);
+        await File.WriteAllTextAsync(Path.Combine(logs, "novalauncher.jsonl"), "id=12345678-1234-1234-1234-123456789abc peer=100.64.0.2 path=C:\\Users\\Person\\save.dat");
+        var destination = Path.Combine(_root, "diagnostics.zip"); var service = new SanitizedDiagnosticExportService(_root, TimeProvider.System);
+
+        var result = await service.ExportAsync(destination, CancellationToken.None);
+
+        Assert.True(result.Success, result.Message); using var archive = ZipFile.OpenRead(destination); using var reader = new StreamReader(archive.GetEntry("sanitized-log.jsonl")!.Open()); var text = await reader.ReadToEndAsync();
+        Assert.DoesNotContain("12345678", text, StringComparison.Ordinal); Assert.DoesNotContain("100.64.0.2", text, StringComparison.Ordinal); Assert.DoesNotContain("Person", text, StringComparison.Ordinal); Assert.Contains("[redacted", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SettingsSchemaOneMigratesExplicitlyToStableChannel()
+    {
+        await using var fixture = PersistenceTestFixture.Create(); Directory.CreateDirectory(fixture.Root);
+        await File.WriteAllTextAsync(Path.Combine(fixture.Root, "settings.json"), "{\"schemaVersion\":1,\"settings\":{\"themeId\":\"nova-dark\",\"reduceMotion\":false,\"confirmBeforeRemovingLibraryItems\":true}}");
+
+        var load = await fixture.SettingsStore.LoadAsync(CancellationToken.None);
+
+        Assert.Equal(DocumentLoadStatus.MigratedLegacy, load.Status); Assert.Equal(SettingsDocument.CurrentSchemaVersion, load.Document!.SchemaVersion); Assert.Equal("Stable", load.Document.Settings.UpdateChannel);
+        var save = await fixture.SettingsStore.SaveAsync(load.Document, CancellationToken.None);
+        Assert.Equal(DocumentSaveStatus.Saved, save.Status); Assert.True(File.Exists(Path.Combine(fixture.Root, "settings.json.bak")));
+    }
+
+    [Fact]
+    public async Task UpdateRecoveryOpensOnlyCachedPinnedPreviousVersion()
+    {
+        var dataRoot = Path.Combine(_root, "recovery"); var cache = Path.Combine(dataRoot, "Updates", "InstallerCache"); Directory.CreateDirectory(cache);
+        var cached = Path.Combine(cache, $"NovaLauncher-Setup-{NovaLauncher.Domain.ProductIdentity.Version}-win-x64.exe"); File.Copy(typeof(LifecycleServicesTests).Assembly.Location, cached);
+        var launcher = new FakeInstallerLauncher(); var recovery = new UpdateRecoveryService(dataRoot, new FakeAuthenticode(true), launcher, new HashSet<string> { new('a', 64) }, TimeProvider.System);
+        await recovery.RecordPendingAsync("0.7.0-alpha.1", CancellationToken.None);
+
+        var result = await recovery.LaunchRollbackAsync(CancellationToken.None);
+
+        Assert.True(result.Success, result.Message); Assert.Equal(cached, launcher.LaunchedPath); Assert.True(recovery.State.RollbackAvailable);
+    }
+
+    [Fact]
+    public async Task HealthySessionClearsPendingUpdateReceipt()
+    {
+        var dataRoot = Path.Combine(_root, "healthy"); var recovery = new UpdateRecoveryService(dataRoot, new FakeAuthenticode(true), new FakeInstallerLauncher(), new HashSet<string> { new('a', 64) }, TimeProvider.System);
+        await recovery.RecordPendingAsync(NovaLauncher.Domain.ProductIdentity.Version, CancellationToken.None);
+
+        recovery.CompleteHealthySession();
+
+        Assert.False(recovery.State.RollbackAvailable); Assert.False(File.Exists(Path.Combine(dataRoot, "Updates", "pending-update.json")));
+    }
+
+    [Fact]
+    public async Task OldAppShutdownKeepsReceiptUntilCancelledUpdateRestartIsHealthy()
+    {
+        var dataRoot = Path.Combine(_root, "handoff-receipt"); var firstSession = new UpdateRecoveryService(dataRoot, new FakeAuthenticode(true), new FakeInstallerLauncher(), new HashSet<string> { new('a', 64) }, TimeProvider.System);
+        await firstSession.RecordPendingAsync("0.7.0-alpha.1", CancellationToken.None);
+
+        firstSession.CompleteHealthySession();
+        Assert.True(File.Exists(Path.Combine(dataRoot, "Updates", "pending-update.json")));
+        var restartedOldVersion = new UpdateRecoveryService(dataRoot, new FakeAuthenticode(true), new FakeInstallerLauncher(), new HashSet<string> { new('a', 64) }, TimeProvider.System);
+        restartedOldVersion.CompleteHealthySession();
+
+        Assert.False(File.Exists(Path.Combine(dataRoot, "Updates", "pending-update.json")));
+    }
+
+    private static UpdateRelease Release(long size) => new("0.6.0", "v0.6.0", "notes", new("https://github.com/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe"), new("https://github.com/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums"), size, false);
+    private GitHubUpdateService CreateUpdateService(RoutingHandler handler, IAuthenticodeVerifier authenticode, IUpdateInstallerLauncher launcher, string stagingName, bool hasPin) => new(new HttpClient(handler), authenticode, launcher, new FakeUpdateRecovery(), Path.Combine(_root, stagingName), hasPin ? new HashSet<string> { new('a', 64) } : new HashSet<string>());
+    private static string ReleasesJson(string tag, bool prerelease, long size) => $$"""[{"draft":false,"prerelease":{{prerelease.ToString().ToLowerInvariant()}},"tag_name":"{{tag}}","body":"notes","assets":[{"name":"NovaLauncher-Setup-0.6.0-win-x64.exe","size":{{size}},"browser_download_url":"https://github.com/Lightyear4509/NovaLauncher/releases/download/{{tag}}/NovaLauncher-Setup-0.6.0-win-x64.exe"},{"name":"SHA256SUMS.txt","size":100,"browser_download_url":"https://github.com/Lightyear4509/NovaLauncher/releases/download/{{tag}}/SHA256SUMS.txt"}]}]""";
+    public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); GC.SuppressFinalize(this); }
+
+    private sealed class FakeAuthenticode(bool trusted) : IAuthenticodeVerifier { public AuthenticodeVerification Verify(string path, IReadOnlySet<string> pins) => new(trusted, trusted ? "valid" : "invalid"); }
+    private sealed class FakeInstallerLauncher : IUpdateInstallerLauncher { public string? LaunchedPath { get; private set; } public bool Launch(string path) { LaunchedPath = path; return true; } }
+    private sealed class FakeUpdateRecovery : IUpdateRecoveryService
+    {
+        public UpdateRecoveryState State => new(false, "none");
+        public Task RecordPendingAsync(string targetVersion, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<UpdateLaunchResult> LaunchRollbackAsync(CancellationToken cancellationToken) => Task.FromResult(new UpdateLaunchResult(false, "none"));
+        public void CompleteHealthySession() { }
+    }
+    private sealed class RoutingHandler : HttpMessageHandler
+    {
+        private readonly Dictionary<string, byte[]> _responses = new(StringComparer.OrdinalIgnoreCase); public int RequestCount { get; private set; }
+        public void Add(string host, string path, byte[] bytes) => _responses[host + path] = bytes;
+        public void AddJson(string host, string json) => Add(host, "/repos/Lightyear4509/NovaLauncher/releases", Encoding.UTF8.GetBytes(json));
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) { RequestCount++; var key = request.RequestUri!.Host + request.RequestUri.AbsolutePath; if (!_responses.TryGetValue(key, out var bytes)) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)); var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) }; response.Content.Headers.ContentLength = bytes.Length; return Task.FromResult(response); }
+    }
+}

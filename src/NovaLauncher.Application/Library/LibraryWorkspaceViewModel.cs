@@ -12,6 +12,7 @@ using NovaLauncher.Application.Themes;
 using NovaLauncher.Application.SaveSync;
 using NovaLauncher.Domain.SaveSync;
 using NovaLauncher.Application.GameTransfer;
+using NovaLauncher.Application.Lifecycle;
 
 namespace NovaLauncher.Application.Library;
 
@@ -32,7 +33,11 @@ public sealed class LibraryWorkspaceViewModel(
     IManualCoverService? manualCovers = null,
     ISaveSyncService? saveSync = null,
     IGameIdentityService? identityService = null,
-    IGameTransferService? gameTransfers = null) : INotifyPropertyChanged
+    IGameTransferService? gameTransfers = null,
+    IUpdateService? updates = null,
+    IDiagnosticExportService? diagnostics = null,
+    CrashRecoveryState? crashRecovery = null,
+    IUpdateRecoveryService? updateRecovery = null) : INotifyPropertyChanged
 {
     private LibraryItem? _selectedGame;
     private GameCollection? _selectedCollection;
@@ -106,6 +111,12 @@ public sealed class LibraryWorkspaceViewModel(
     private double _gameTransferProgress;
     private bool _isGameTransferActive;
     private CancellationTokenSource? _gameTransferCancellation;
+    private string _selectedUpdateChannel = themes.UpdateChannel;
+    private UpdateRelease? _availableUpdate;
+    private string _updateStatus = "Updates are checked only when you select Check for updates.";
+    private double _updateProgress;
+    private string? _stagedUpdatePath;
+    private bool _confirmUpdateInstall;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -144,6 +155,17 @@ public sealed class LibraryWorkspaceViewModel(
     public string GameTransferStatus { get => _gameTransferStatus; private set => Set(ref _gameTransferStatus, value); }
     public double GameTransferProgress { get => _gameTransferProgress; private set => Set(ref _gameTransferProgress, value); }
     public bool IsGameTransferActive { get => _isGameTransferActive; private set => Set(ref _isGameTransferActive, value); }
+    public IReadOnlyList<string> UpdateChannelOptions { get; } = ["Stable", "Beta", "Alpha"];
+    public string SelectedUpdateChannel { get => _selectedUpdateChannel; set => Set(ref _selectedUpdateChannel, value); }
+    public UpdateRelease? AvailableUpdate { get => _availableUpdate; private set { if (Set(ref _availableUpdate, value)) OnPropertyChanged(nameof(HasAvailableUpdate)); } }
+    public bool HasAvailableUpdate => AvailableUpdate is not null;
+    public string UpdateStatus { get => _updateStatus; private set => Set(ref _updateStatus, value); }
+    public double UpdateProgress { get => _updateProgress; private set => Set(ref _updateProgress, value); }
+    public bool ConfirmUpdateInstall { get => _confirmUpdateInstall; set { if (Set(ref _confirmUpdateInstall, value)) OnPropertyChanged(nameof(CanLaunchStagedUpdate)); } }
+    public bool CanLaunchStagedUpdate => AvailableUpdate is not null && !string.IsNullOrWhiteSpace(_stagedUpdatePath) && ConfirmUpdateInstall;
+    public string CrashRecoveryStatus => crashRecovery?.Message ?? "Crash recovery state is unavailable.";
+    public string UpdateRecoveryStatus => updateRecovery?.State.Message ?? "Update rollback state is unavailable.";
+    public bool CanRollbackUpdate => updateRecovery?.State.RollbackAvailable == true;
 
     public TrustedSaveSyncPeer? SelectedTrustedPeer
     {
@@ -255,6 +277,42 @@ public sealed class LibraryWorkspaceViewModel(
     public string SteamGridDbKeyStatus => apiKeys?.HasSteamGridDbKey == true
         ? "SteamGridDB artwork access is active for this session."
         : "No SteamGridDB API key is active.";
+
+    public async Task CheckForUpdatesAsync(CancellationToken cancellationToken)
+    {
+        if (updates is null) { UpdateStatus = "The official update service is unavailable."; return; }
+        if (!Enum.TryParse<UpdateChannel>(SelectedUpdateChannel, out var channel)) { UpdateStatus = "Choose a valid update channel."; return; }
+        var saveError = await themes.ConfigureUpdateChannelAsync(SelectedUpdateChannel, cancellationToken).ConfigureAwait(false);
+        if (saveError is not null) { UpdateStatus = saveError; return; }
+        var result = await updates.CheckAsync(channel, cancellationToken).ConfigureAwait(false); AvailableUpdate = result.Release; UpdateStatus = result.Message;
+    }
+
+    public async Task StageAvailableUpdateAsync(CancellationToken cancellationToken)
+    {
+        if (updates is null || AvailableUpdate is null) { UpdateStatus = "Check for a newer official release first."; return; }
+        var progress = new Progress<double>(value => UpdateProgress = Math.Clamp(value * 100, 0, 100));
+        var result = await updates.StageAsync(AvailableUpdate, progress, cancellationToken).ConfigureAwait(false);
+        _stagedUpdatePath = result.StagedInstallerPath; ConfirmUpdateInstall = false; OnPropertyChanged(nameof(CanLaunchStagedUpdate)); UpdateStatus = result.Message;
+    }
+
+    public async Task LaunchStagedUpdateAsync(CancellationToken cancellationToken)
+    {
+        if (updates is null || AvailableUpdate is null || string.IsNullOrWhiteSpace(_stagedUpdatePath) || !ConfirmUpdateInstall) { UpdateStatus = "Verify, stage, and explicitly confirm the installer first."; return; }
+        var result = await updates.LaunchStagedAsync(AvailableUpdate, _stagedUpdatePath, cancellationToken).ConfigureAwait(false); UpdateStatus = result.Message;
+        if (result.Success) ConfirmUpdateInstall = false;
+    }
+
+    public async Task RollbackUpdateAsync(CancellationToken cancellationToken)
+    {
+        if (updateRecovery is null) { UpdateStatus = "Update rollback is unavailable."; return; }
+        var result = await updateRecovery.LaunchRollbackAsync(cancellationToken).ConfigureAwait(false); UpdateStatus = result.Message;
+    }
+
+    public async Task ExportDiagnosticsAsync(string destination, CancellationToken cancellationToken)
+    {
+        if (diagnostics is null) { Status = "Diagnostic export is unavailable."; return; }
+        var result = await diagnostics.ExportAsync(destination, cancellationToken).ConfigureAwait(false); Status = result.Message;
+    }
 
     public string SelectedSort
     {

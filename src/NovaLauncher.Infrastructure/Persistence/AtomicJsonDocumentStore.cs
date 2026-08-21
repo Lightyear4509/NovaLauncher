@@ -17,19 +17,22 @@ public sealed class AtomicJsonDocumentStore<TDocument> : IDocumentStore<TDocumen
     private readonly IDocumentPolicy<TDocument> _policy;
     private readonly JsonTypeInfo<TDocument> _jsonTypeInfo;
     private readonly TimeProvider _timeProvider;
+    private readonly IDocumentMigrator<TDocument>? _migrator;
 
     public AtomicJsonDocumentStore(
         string dataRoot,
         IAtomicFileSystem fileSystem,
         IDocumentPolicy<TDocument> policy,
         JsonTypeInfo<TDocument> jsonTypeInfo,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IDocumentMigrator<TDocument>? migrator = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
         _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _jsonTypeInfo = jsonTypeInfo ?? throw new ArgumentNullException(nameof(jsonTypeInfo));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _migrator = migrator;
 
         var root = Path.GetFullPath(dataRoot);
         _primaryPath = Path.Combine(root, policy.FileName);
@@ -132,7 +135,11 @@ public sealed class AtomicJsonDocumentStore<TDocument> : IDocumentStore<TDocumen
                         "Refusing to overwrite a document created by a newer NovaLauncher schema.");
                 }
 
-                if (existing.Status != ReadStatus.Valid)
+                if (existing.Status == ReadStatus.LegacyValid)
+                {
+                    _fileSystem.CopyFile(_primaryPath, _backupPath, overwrite: true);
+                }
+                else if (existing.Status != ReadStatus.Valid)
                 {
                     PreserveInvalidPrimary();
                 }
@@ -210,6 +217,14 @@ public sealed class AtomicJsonDocumentStore<TDocument> : IDocumentStore<TDocumen
             if (document.SchemaVersion > _policy.CurrentSchemaVersion)
             {
                 return new ReadResult(ReadStatus.NewerSchema, null, document.SchemaVersion);
+            }
+
+            if (document.SchemaVersion < _policy.CurrentSchemaVersion)
+            {
+                var migrated = _migrator?.Migrate(document);
+                return migrated is not null && ValidateForCurrentSchema(migrated) is null
+                    ? new ReadResult(ReadStatus.LegacyValid, migrated, document.SchemaVersion)
+                    : new ReadResult(ReadStatus.Invalid, null, document.SchemaVersion);
             }
 
             return ValidateForCurrentSchema(document) is null
