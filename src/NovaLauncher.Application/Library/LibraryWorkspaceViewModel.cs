@@ -11,6 +11,7 @@ using NovaLauncher.Domain.Achievements;
 using NovaLauncher.Application.Themes;
 using NovaLauncher.Application.SaveSync;
 using NovaLauncher.Domain.SaveSync;
+using NovaLauncher.Application.GameTransfer;
 
 namespace NovaLauncher.Application.Library;
 
@@ -30,7 +31,8 @@ public sealed class LibraryWorkspaceViewModel(
     IApiKeySession? apiKeys = null,
     IManualCoverService? manualCovers = null,
     ISaveSyncService? saveSync = null,
-    IGameIdentityService? identityService = null) : INotifyPropertyChanged
+    IGameIdentityService? identityService = null,
+    IGameTransferService? gameTransfers = null) : INotifyPropertyChanged
 {
     private LibraryItem? _selectedGame;
     private GameCollection? _selectedCollection;
@@ -95,6 +97,15 @@ public sealed class LibraryWorkspaceViewModel(
     private SaveSnapshotHistoryItem? _selectedSaveSnapshot;
     private TrustedSaveSyncPeer? _selectedTrustedPeer;
     private string _trustedPeerName = string.Empty;
+    private string _gameTransferSourceFolder = string.Empty;
+    private string _gameTransferDestination = string.Empty;
+    private bool _gameTransferRightsAttested;
+    private GameTransferPreview? _gameTransferPreview;
+    private PeerGameTransferOffer? _selectedGameTransferOffer;
+    private string _gameTransferStatus = "No peer game transfer is active.";
+    private double _gameTransferProgress;
+    private bool _isGameTransferActive;
+    private CancellationTokenSource? _gameTransferCancellation;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -121,6 +132,18 @@ public sealed class LibraryWorkspaceViewModel(
     public ObservableCollection<SaveSnapshotHistoryItem> SaveSnapshotHistory { get; } = [];
     public ObservableCollection<SaveRestoreHistoryItem> SaveRestoreHistory { get; } = [];
     public ObservableCollection<TrustedSaveSyncPeer> TrustedSaveSyncPeers { get; } = [];
+    public ObservableCollection<PeerGameTransferOffer> PeerGameTransferOffers { get; } = [];
+    public ObservableCollection<GameTransferAuditItem> GameTransferHistory { get; } = [];
+
+    public string GameTransferSourceFolder { get => _gameTransferSourceFolder; set => Set(ref _gameTransferSourceFolder, value); }
+    public string GameTransferDestination { get => _gameTransferDestination; set => Set(ref _gameTransferDestination, value); }
+    public bool GameTransferRightsAttested { get => _gameTransferRightsAttested; set => Set(ref _gameTransferRightsAttested, value); }
+    public GameTransferPreview? GameTransferPreview { get => _gameTransferPreview; private set { if (Set(ref _gameTransferPreview, value)) OnPropertyChanged(nameof(HasGameTransferPreview)); } }
+    public bool HasGameTransferPreview => GameTransferPreview?.Accepted == true;
+    public PeerGameTransferOffer? SelectedGameTransferOffer { get => _selectedGameTransferOffer; set => Set(ref _selectedGameTransferOffer, value); }
+    public string GameTransferStatus { get => _gameTransferStatus; private set => Set(ref _gameTransferStatus, value); }
+    public double GameTransferProgress { get => _gameTransferProgress; private set => Set(ref _gameTransferProgress, value); }
+    public bool IsGameTransferActive { get => _isGameTransferActive; private set => Set(ref _isGameTransferActive, value); }
 
     public TrustedSaveSyncPeer? SelectedTrustedPeer
     {
@@ -463,6 +486,7 @@ public sealed class LibraryWorkspaceViewModel(
                     Target = value.LaunchTarget.Target;
                     Arguments = string.Join(Environment.NewLine, value.LaunchTarget.Arguments);
                     WorkingDirectory = value.LaunchTarget.WorkingDirectory ?? string.Empty;
+                    GameTransferSourceFolder = value.LaunchTarget.WorkingDirectory ?? Path.GetDirectoryName(value.LaunchTarget.Target) ?? string.Empty;
                     SaveSyncLabel = value.SaveSyncLabel ?? value.Name;
                     IdentitySearchText = value.Name;
                     ManualDescription = value.Metadata.Description?.Value ?? string.Empty;
@@ -479,6 +503,7 @@ public sealed class LibraryWorkspaceViewModel(
                 IdentitySearchFailures.Clear();
                 ArtworkVariants.Clear();
                 SaveSnapshotHistory.Clear();
+                GameTransferPreview = null;
                 SelectedSaveSnapshot = null;
                 OnPropertyChanged(nameof(HasIdentityCandidates));
                 OnPropertyChanged(nameof(HasArtworkVariants));
@@ -1230,6 +1255,64 @@ public sealed class LibraryWorkspaceViewModel(
         SaveSyncPairingFeedback = error ?? "Trusted device independently revoked.";
         SelectedTrustedPeer = null;
         RefreshSaveSyncPairingState();
+    }
+
+    public async Task PreviewSelectedGameTransferAsync(CancellationToken cancellationToken)
+    {
+        if (gameTransfers is null || SelectedGame is null) { GameTransferStatus = "Select a manually added game first."; return; }
+        GameTransferPreview = await gameTransfers.PreviewAsync(SelectedGame, GameTransferSourceFolder, cancellationToken);
+        GameTransferStatus = GameTransferPreview.Accepted
+            ? $"Preview ready: {GameTransferPreview.Files.Count:N0} files, {GameTransferPreview.TotalBytes:N0} bytes. Nothing is shared until authorization."
+            : GameTransferPreview.Error ?? "The folder cannot be offered.";
+    }
+
+    public async Task AuthorizeSelectedGameTransferAsync(CancellationToken cancellationToken)
+    {
+        if (gameTransfers is null || SelectedGame is null || GameTransferPreview is null || SelectedTrustedPeer is null)
+        { GameTransferStatus = "Create a preview and select one active trusted recipient."; return; }
+        var result = await gameTransfers.AuthorizeAsync(SelectedGame, GameTransferPreview, [SelectedTrustedPeer.DeviceId], GameTransferRightsAttested, cancellationToken);
+        GameTransferStatus = result.Message;
+        await RefreshGameTransferHistoryAsync(cancellationToken);
+    }
+
+    public async Task RefreshPeerGameTransferOffersAsync(CancellationToken cancellationToken)
+    {
+        if (gameTransfers is null) return;
+        PeerGameTransferOffers.Clear();
+        foreach (var offer in await gameTransfers.RefreshOffersAsync(cancellationToken)) PeerGameTransferOffers.Add(offer);
+        GameTransferStatus = PeerGameTransferOffers.Count == 0 ? "No authorized offers are available from active trusted devices." : $"Found {PeerGameTransferOffers.Count} authorized offer(s).";
+    }
+
+    public async Task DownloadSelectedGameTransferAsync(CancellationToken cancellationToken)
+    {
+        if (gameTransfers is null || SelectedGameTransferOffer is null || string.IsNullOrWhiteSpace(GameTransferDestination))
+        { GameTransferStatus = "Select an authorized offer and an empty destination."; return; }
+        _gameTransferCancellation?.Dispose();
+        _gameTransferCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        IsGameTransferActive = true;
+        GameTransferProgress = 0;
+        try
+        {
+            var progress = new Progress<GameTransferProgress>(item =>
+            {
+                GameTransferProgress = item.TotalBytes == 0 ? 0 : item.CompletedBytes * 100d / item.TotalBytes;
+                GameTransferStatus = $"Receiving {item.RelativePath} · {item.CompletedBytes:N0}/{item.TotalBytes:N0} bytes · {item.BytesPerSecond / 1024d / 1024d:F1} MiB/s";
+            });
+            var result = await gameTransfers.DownloadAsync(SelectedGameTransferOffer, GameTransferDestination, progress, _gameTransferCancellation.Token);
+            GameTransferStatus = result.Message;
+            if (result.Success) GameTransferProgress = 100;
+        }
+        catch (OperationCanceledException) { GameTransferStatus = "Transfer paused or cancelled. Verified staged progress is retained for resume."; }
+        finally { IsGameTransferActive = false; await RefreshGameTransferHistoryAsync(CancellationToken.None); }
+    }
+
+    public void PauseGameTransfer() => _gameTransferCancellation?.Cancel();
+
+    public async Task RefreshGameTransferHistoryAsync(CancellationToken cancellationToken)
+    {
+        GameTransferHistory.Clear();
+        if (gameTransfers is null) return;
+        foreach (var item in (await gameTransfers.GetHistoryAsync(cancellationToken)).OrderByDescending(static item => item.TimestampUtc)) GameTransferHistory.Add(item);
     }
 
     public void RefreshSaveSyncPairingState()

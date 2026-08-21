@@ -18,6 +18,8 @@ using System.Security.Cryptography;
 using System.Text;
 using NovaLauncher.Application.Themes;
 using NovaLauncher.Application.SaveSync;
+using NovaLauncher.Application.GameTransfer;
+using NovaLauncher.Infrastructure.GameTransfer;
 using NovaLauncher.Infrastructure.SaveSync;
 
 namespace NovaLauncher.App;
@@ -164,10 +166,13 @@ internal static class Program
         services.AddSingleton<WindowsCredentialPairingSecretStore>();
         services.AddSingleton<IPairingSecretStore>(provider => provider.GetRequiredService<WindowsCredentialPairingSecretStore>());
         services.AddSingleton<IPeerCredentialStore>(provider => provider.GetRequiredService<WindowsCredentialPairingSecretStore>());
-        services.AddSingleton<ISaveSyncTransport>(provider => new TailscaleTcpTransport(
+        services.AddSingleton<TailscaleTcpTransport>(provider => new TailscaleTcpTransport(
             () => provider.GetRequiredService<ISaveSyncService>().Settings,
             provider.GetRequiredService<IPairingSecretStore>(),
             peerCredentials: provider.GetRequiredService<IPeerCredentialStore>()));
+        services.AddSingleton<ISaveSyncTransport>(provider => provider.GetRequiredService<TailscaleTcpTransport>());
+        services.AddSingleton<IPeerGameTransferTransport>(provider => provider.GetRequiredService<TailscaleTcpTransport>());
+        services.AddSingleton<IReceivedContentScanner, WindowsDefenderContentScanner>();
         services.AddSingleton<ISaveSyncService>(provider => new SaveSyncCoordinator(
             provider.GetRequiredService<IDocumentStore<SaveSyncDocument>>(),
             provider.GetRequiredService<ISaveSyncTransport>(),
@@ -175,6 +180,13 @@ internal static class Program
             provider.GetRequiredService<TimeProvider>(),
             dataRoot,
             peerCredentials: provider.GetRequiredService<IPeerCredentialStore>()));
+        services.AddSingleton<GameTransferCoordinator>(provider => new GameTransferCoordinator(
+            provider.GetRequiredService<IPeerGameTransferTransport>(),
+            provider.GetRequiredService<ISaveSyncService>(),
+            provider.GetRequiredService<TimeProvider>(),
+            dataRoot,
+            provider.GetRequiredService<IReceivedContentScanner>()));
+        services.AddSingleton<IGameTransferService>(provider => provider.GetRequiredService<GameTransferCoordinator>());
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IAtomicFileSystem, PhysicalAtomicFileSystem>();
         services.AddSingleton<IDocumentStore<GamesDocument>>(provider =>
@@ -215,7 +227,9 @@ internal static class Program
             builder.AddProvider(new JsonLinesFileLoggerProvider(logPath));
         });
 
-        return services.BuildServiceProvider(
+        var provider = services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+        provider.GetRequiredService<GameTransferCoordinator>().AttachEndpoint();
+        return provider;
     }
 }

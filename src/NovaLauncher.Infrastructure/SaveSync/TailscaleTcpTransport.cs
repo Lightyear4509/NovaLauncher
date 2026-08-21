@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using NovaLauncher.Application.SaveSync;
+using NovaLauncher.Application.GameTransfer;
 using NovaLauncher.Domain.Library;
 using NovaLauncher.Domain.SaveSync;
 
@@ -16,7 +17,7 @@ public sealed class TailscaleTcpTransport(
     IPairingSecretStore secrets,
     IPAddress? localAddressOverride = null,
     int? localPortOverride = null,
-    IPeerCredentialStore? peerCredentials = null) : ISaveSyncTransport, IDisposable
+    IPeerCredentialStore? peerCredentials = null) : ISaveSyncTransport, IPeerGameTransferTransport, IDisposable
 {
     private const int MaximumFrameBytes = 520 * 1024 * 1024;
     private const int BootstrapMarker = -2;
@@ -27,6 +28,7 @@ public sealed class TailscaleTcpTransport(
     private TcpListener? _listener;
     private Task? _acceptLoop;
     private ISaveSyncPeerEndpoint? _endpoint;
+    private IPeerGameTransferEndpoint? _gameTransferEndpoint;
     private int _disposed;
     private readonly ConcurrentDictionary<Guid, long> _seenRequests = new();
 
@@ -37,6 +39,20 @@ public sealed class TailscaleTcpTransport(
         (settings().PeerDeviceId == peer.DeviceId && secrets.HasSecret)));
     public bool IsListening => _listener is not null;
     public string ListenerStatus { get; private set; } = "Listener has not been started.";
+
+    public void AttachGameTransferEndpoint(IPeerGameTransferEndpoint endpoint) => _gameTransferEndpoint = endpoint;
+
+    public async Task<IReadOnlyList<GameTransferManifest>> ListGameTransferOffersAsync(TrustedSaveSyncPeer peer, CancellationToken cancellationToken)
+    {
+        var response = await SendWireAsync(peer, new WireRequest(Guid.NewGuid(), "ListGameTransfers", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), default, null, null, null, null, 0, 0), cancellationToken).ConfigureAwait(false);
+        return response.GameTransferOffers ?? [];
+    }
+
+    public async Task<GameTransferChunkResult> PullGameTransferChunkAsync(TrustedSaveSyncPeer peer, Guid offerId, string relativePath, long offset, int maximumBytes, CancellationToken cancellationToken)
+    {
+        var response = await SendWireAsync(peer, new WireRequest(Guid.NewGuid(), "PullGameTransferChunk", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), default, null, null, offerId, relativePath, offset, maximumBytes), cancellationToken).ConfigureAwait(false);
+        return response.GameTransferChunk ?? new(false, null, false, response.Result?.Error ?? "The peer returned no transfer chunk.");
+    }
 
     public async Task StartAsync(ISaveSyncPeerEndpoint endpoint, CancellationToken cancellationToken)
     {
@@ -71,16 +87,16 @@ public sealed class TailscaleTcpTransport(
     }
 
     public Task<TransportResult> PullAsync(GameId gameId, Guid? knownHead, CancellationToken cancellationToken) =>
-        SendAsync(new WireRequest(Guid.NewGuid(), "Pull", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), gameId, knownHead, null), cancellationToken);
+        SendAsync(new WireRequest(Guid.NewGuid(), "Pull", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), gameId, knownHead, null, null, null, 0, 0), cancellationToken);
 
     public Task<TransportResult> PushAsync(SaveSnapshotPayload snapshot, CancellationToken cancellationToken) =>
-        SendAsync(new WireRequest(Guid.NewGuid(), "Push", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), snapshot.Manifest.GameId, null, snapshot), cancellationToken);
+        SendAsync(new WireRequest(Guid.NewGuid(), "Push", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), snapshot.Manifest.GameId, null, snapshot, null, null, 0, 0), cancellationToken);
 
     public Task<TransportResult> PullAsync(TrustedSaveSyncPeer peer, GameId gameId, Guid? knownHead, CancellationToken cancellationToken) =>
-        SendAsync(peer, new WireRequest(Guid.NewGuid(), "Pull", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), gameId, knownHead, null), cancellationToken);
+        SendAsync(peer, new WireRequest(Guid.NewGuid(), "Pull", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), gameId, knownHead, null, null, null, 0, 0), cancellationToken);
 
     public Task<TransportResult> PushAsync(TrustedSaveSyncPeer peer, SaveSnapshotPayload snapshot, CancellationToken cancellationToken) =>
-        SendAsync(peer, new WireRequest(Guid.NewGuid(), "Push", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), snapshot.Manifest.GameId, null, snapshot), cancellationToken);
+        SendAsync(peer, new WireRequest(Guid.NewGuid(), "Push", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), snapshot.Manifest.GameId, null, snapshot, null, null, 0, 0), cancellationToken);
 
     public async Task<PairingRedemptionResult> RedeemInvitationAsync(string code, Guid requestingDeviceId, CancellationToken cancellationToken)
     {
@@ -110,7 +126,13 @@ public sealed class TailscaleTcpTransport(
 
     private async Task<TransportResult> SendAsync(TrustedSaveSyncPeer peer, WireRequest request, CancellationToken cancellationToken)
     {
-        if (peer.State != TrustedPeerState.Active) return new(false, false, null, "The selected peer is not active.");
+        var response = await SendWireAsync(peer, request, cancellationToken).ConfigureAwait(false);
+        return response.Result ?? new(false, false, null, "The peer returned no save-sync result.");
+    }
+
+    private async Task<WireResponse> SendWireAsync(TrustedSaveSyncPeer peer, WireRequest request, CancellationToken cancellationToken)
+    {
+        if (peer.State != TrustedPeerState.Active) return new(settings().DeviceId, new(false, false, null, "The selected peer is not active."), null, null);
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -123,11 +145,11 @@ public sealed class TailscaleTcpTransport(
             await WriteEncryptedAsync(stream, request, settings().DeviceId, key, timeout.Token).ConfigureAwait(false);
             var response = await ReadEncryptedAsync<WireResponse>(stream, peer.DeviceId, key, timeout.Token).ConfigureAwait(false);
             if (_endpoint is null || !await _endpoint.AuthorizePeerAsync(response.DeviceId, timeout.Token).ConfigureAwait(false))
-                return new(false, false, null, "The responding device identity is not paired.");
-            return response.Result;
+                return new(response.DeviceId, new(false, false, null, "The responding device identity is not paired."), null, null);
+            return response;
         }
         catch (Exception exception) when (exception is SocketException or IOException or OperationCanceledException or CryptographicException or JsonException)
-        { return new(false, false, null, $"Peer transfer failed: {exception.Message}"); }
+        { return new(peer.DeviceId, new(false, false, null, $"Peer transfer failed: {exception.Message}"), null, null); }
     }
 
     private async Task AcceptLoopAsync(CancellationToken cancellationToken)
@@ -168,7 +190,9 @@ public sealed class TailscaleTcpTransport(
                         return;
                     }
                     var (request, _, requestKey) = await ReadIncomingRequestAsync(stream, header, cancellationToken).ConfigureAwait(false);
-                    TransportResult result;
+                    TransportResult? result = null;
+                    IReadOnlyList<GameTransferManifest>? transferOffers = null;
+                    GameTransferChunkResult? transferChunk = null;
                     var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                     if (_seenRequests.Count > 4096)
                         foreach (var old in _seenRequests.Where(item => now - item.Value > 120).Select(static item => item.Key)) _seenRequests.TryRemove(old, out _);
@@ -181,8 +205,12 @@ public sealed class TailscaleTcpTransport(
                         result = await _endpoint.ServePullAsync(request.GameId, request.KnownHead, cancellationToken).ConfigureAwait(false);
                     else if (request.Operation == "Push" && request.Snapshot is not null)
                         result = await _endpoint.ReceivePushAsync(request.Snapshot, cancellationToken).ConfigureAwait(false);
+                    else if (request.Operation == "ListGameTransfers" && _gameTransferEndpoint is not null)
+                        transferOffers = await _gameTransferEndpoint.ListAuthorizedGameTransfersAsync(request.DeviceId, cancellationToken).ConfigureAwait(false);
+                    else if (request.Operation == "PullGameTransferChunk" && _gameTransferEndpoint is not null && request.TransferOfferId is { } offerId && request.TransferRelativePath is not null)
+                        transferChunk = await _gameTransferEndpoint.ServeGameTransferChunkAsync(request.DeviceId, offerId, request.TransferRelativePath, request.TransferOffset, request.TransferMaximumBytes, cancellationToken).ConfigureAwait(false);
                     else result = new(false, false, null, "Unknown peer operation.");
-                    await WriteEncryptedAsync(stream, new WireResponse(settings().DeviceId, result), settings().DeviceId, requestKey, cancellationToken).ConfigureAwait(false);
+                    await WriteEncryptedAsync(stream, new WireResponse(settings().DeviceId, result, transferOffers, transferChunk), settings().DeviceId, requestKey, cancellationToken).ConfigureAwait(false);
                     CryptographicOperations.ZeroMemory(requestKey);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
@@ -329,7 +357,7 @@ public sealed class TailscaleTcpTransport(
         _startGate.Dispose();
     }
 
-    private sealed record WireRequest(Guid RequestId, string Operation, Guid DeviceId, long Timestamp, GameId GameId, Guid? KnownHead, SaveSnapshotPayload? Snapshot);
-    private sealed record WireResponse(Guid DeviceId, TransportResult Result);
+    private sealed record WireRequest(Guid RequestId, string Operation, Guid DeviceId, long Timestamp, GameId GameId, Guid? KnownHead, SaveSnapshotPayload? Snapshot, Guid? TransferOfferId, string? TransferRelativePath, long TransferOffset, int TransferMaximumBytes);
+    private sealed record WireResponse(Guid DeviceId, TransportResult? Result, IReadOnlyList<GameTransferManifest>? GameTransferOffers, GameTransferChunkResult? GameTransferChunk);
     private sealed record BootstrapRequest(string Code, Guid DeviceId);
 }

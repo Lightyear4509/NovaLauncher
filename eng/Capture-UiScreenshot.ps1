@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory = $true)][string]$OutputPath,
     [string]$Configuration = 'Release',
     [string]$ExecutablePath,
+    [string]$NavigationName,
     [int]$TimeoutSeconds = 20
 )
 
@@ -23,6 +24,8 @@ $previousDataRoot = $env:NOVALAUNCHER_TEST_DATA_ROOT
 $env:NOVALAUNCHER_TEST_DATA_ROOT = $captureData
 
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -46,6 +49,14 @@ try {
     }
     if ($handle -eq [IntPtr]::Zero) { throw 'NovaLauncher did not expose a responsive window before the capture timeout.' }
     [void](New-Object -ComObject WScript.Shell).AppActivate($process.Id)
+    if (-not [string]::IsNullOrWhiteSpace($NavigationName)) {
+        $rootElement = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+        $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $NavigationName)
+        $navigation = $rootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+        if ($null -eq $navigation) { throw "Could not find navigation control '$NavigationName'." }
+        $invoke = $navigation.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+        $invoke.Invoke()
+    }
     Start-Sleep -Milliseconds 700
     $rect = [NovaWindowCapture+Rect]::new()
     if (-not [NovaWindowCapture]::GetWindowRect($handle, [ref]$rect)) { throw 'Could not read the NovaLauncher window bounds.' }
