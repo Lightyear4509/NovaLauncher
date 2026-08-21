@@ -12,11 +12,14 @@ public sealed class SaveSyncCoordinator(
     IPairingSecretStore secrets,
     TimeProvider timeProvider,
     string dataRoot,
-    TimeSpan? quietPeriod = null) : ISaveSyncService, ISaveSyncPeerEndpoint, IDisposable
+    TimeSpan? quietPeriod = null,
+    IPeerCredentialStore? peerCredentials = null) : ISaveSyncService, ISaveSyncPeerEndpoint, IDisposable
 {
     public const int MaximumFiles = 20_000;
     public const long MaximumFileBytes = 64L * 1024 * 1024;
     public const long MaximumSnapshotBytes = 512L * 1024 * 1024;
+    public const int MaximumRetainedSnapshotsPerGame = 20;
+    public const int MaximumRetainedRestoreBackupsPerGame = 10;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _identityGate = new(1, 1);
     private SaveSyncDocument _document = SaveSyncDocument.CreateDefault();
@@ -24,10 +27,10 @@ public sealed class SaveSyncCoordinator(
     private readonly TimeSpan _quietPeriod = quietPeriod ?? TimeSpan.FromSeconds(2);
 
     public SaveSyncSettings Settings => _document.Settings;
-    public bool IsPaired => secrets.HasSecret && Settings.PeerDeviceId is not null;
+    public bool IsPaired => ActivePeers().Length > 0;
     public bool IsListening => transport.IsListening;
     public string ListenerStatus => transport.ListenerStatus;
-    private bool HasActiveCredentials => secrets.HasSecret && (IsPaired ||
+    private bool HasActiveCredentials => IsPaired || (secrets.HasSecret &&
         Settings.PendingInvitationId is not null && Settings.PendingInvitationExpiresAtUtc > timeProvider.GetUtcNow());
 
     public async Task<string?> InitializeAsync(CancellationToken cancellationToken)
@@ -38,6 +41,44 @@ public sealed class SaveSyncCoordinator(
         {
             var save = await store.SaveAsync(_document, cancellationToken).ConfigureAwait(false);
             if (save.Status != DocumentSaveStatus.Saved) return save.Error ?? "Save-sync identity could not be created.";
+        }
+        if (Settings.PeerDeviceId is { } legacyPeer &&
+            Settings.EffectiveTrustedPeers.Count == 0 &&
+            TailscalePeerValidator.TryNormalize(Settings.PeerAddress ?? string.Empty, out var legacyAddress, out _))
+        {
+            var credentialReference = "NovaLauncher.SaveSync.LegacyPeer";
+            var copiedCredential = false;
+            var legacySecret = secrets.GetSecret();
+            if (peerCredentials is not null && legacySecret is { Length: 32 })
+            {
+                peerCredentials.SetSecret(legacyPeer, legacySecret);
+                credentialReference = peerCredentials.GetCredentialReference(legacyPeer);
+                copiedCredential = true;
+            }
+            if (legacySecret is not null) CryptographicOperations.ZeroMemory(legacySecret);
+            var migrated = _document with
+            {
+                Settings = Settings with
+                {
+                    TrustedPeers =
+                    [
+                        new TrustedSaveSyncPeer(
+                            legacyPeer,
+                            $"Paired device {legacyPeer.ToString("N", System.Globalization.CultureInfo.InvariantCulture)[..8]}",
+                            legacyAddress,
+                            credentialReference,
+                            TrustedPeerState.Active,
+                            timeProvider.GetUtcNow()),
+                    ],
+                },
+            };
+            var migrationSave = await store.SaveAsync(migrated, cancellationToken).ConfigureAwait(false);
+            if (migrationSave.Status != DocumentSaveStatus.Saved)
+            {
+                if (copiedCredential) peerCredentials!.Clear(legacyPeer);
+                return migrationSave.Error ?? "The existing paired device could not be migrated safely.";
+            }
+            _document = migrated;
         }
         if (!IsPaired && Settings.PendingInvitationExpiresAtUtc is { } expired && expired <= timeProvider.GetUtcNow())
         {
@@ -57,7 +98,7 @@ public sealed class SaveSyncCoordinator(
             if (clearSave.Status != DocumentSaveStatus.Saved) return clearSave.Error ?? "An expired pairing invitation could not be cleared safely.";
             _document = cleared;
         }
-        if (HasActiveCredentials && !string.IsNullOrWhiteSpace(Settings.PeerAddress))
+        if (HasActiveCredentials)
         {
             try
             {
@@ -66,7 +107,7 @@ public sealed class SaveSyncCoordinator(
                 {
                     var payload = await LoadSnapshotAsync(pending.GameId, pending.HeadSnapshotId!.Value, fullContent: false, cancellationToken).ConfigureAwait(false);
                     if (payload is null) continue;
-                    var pushed = await transport.PushAsync(payload, cancellationToken).ConfigureAwait(false);
+                    var pushed = await PushToActivePeersAsync(payload, cancellationToken).ConfigureAwait(false);
                     if (pushed.Success) await SetStateAsync(pending with { Status = "Synchronized" }, cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -78,7 +119,8 @@ public sealed class SaveSyncCoordinator(
     public async Task<string> GeneratePairingCodeAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (IsPaired) throw new InvalidOperationException("This device is already paired. Revoke the existing device before creating another invitation.");
+        if (Settings.EffectiveTrustedPeers.Count(peer => peer.State != TrustedPeerState.Revoked) >= SaveSyncSettings.MaximumTrustedPeers)
+            throw new InvalidOperationException($"At most {SaveSyncSettings.MaximumTrustedPeers} trusted devices may be retained.");
         var secret = RandomNumberGenerator.GetBytes(32);
         var invitationId = Guid.NewGuid();
         var expires = timeProvider.GetUtcNow().AddHours(24);
@@ -110,19 +152,39 @@ public sealed class SaveSyncCoordinator(
 
     public async Task<string?> ApplyPairingCodeAsync(string code, CancellationToken cancellationToken)
     {
-        if (IsPaired) return "This device is already paired. Revoke it before accepting another invitation.";
+        if (Settings.EffectiveTrustedPeers.Count(peer => peer.State != TrustedPeerState.Revoked) >= SaveSyncSettings.MaximumTrustedPeers)
+            return $"At most {SaveSyncSettings.MaximumTrustedPeers} trusted devices may be retained.";
         if (!TryNormalizePairingCode(code, out var normalized)) return "Enter the six-digit invitation code.";
         if (string.IsNullOrWhiteSpace(Settings.PeerAddress)) return "Enter and save the inviter's Tailscale IP first.";
         var redemption = await transport.RedeemInvitationAsync(normalized, Settings.DeviceId, cancellationToken).ConfigureAwait(false);
         if (!redemption.Success || redemption.PeerDeviceId is null || redemption.Secret is not { Length: 32 } secret)
             return redemption.Error ?? "The invitation was rejected.";
-        try { secrets.SetSecret(secret); }
+        var credentialReference = "NovaLauncher.SaveSync.LegacyPeer";
+        try
+        {
+            secrets.SetSecret(secret);
+            if (peerCredentials is not null)
+            {
+                peerCredentials.SetSecret(redemption.PeerDeviceId.Value, secret);
+                credentialReference = peerCredentials.GetCredentialReference(redemption.PeerDeviceId.Value);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException)
+        {
+            secrets.Clear();
+            peerCredentials?.Clear(redemption.PeerDeviceId.Value);
+            return $"The peer credential could not be stored safely: {exception.Message}";
+        }
         finally { CryptographicOperations.ZeroMemory(secret); }
+        var now = timeProvider.GetUtcNow();
         var staged = _document with
         {
             Settings = Settings with
             {
-                PeerDeviceId = redemption.PeerDeviceId,
+                PeerDeviceId = Settings.PeerDeviceId ?? redemption.PeerDeviceId,
+                TrustedPeers = UpsertTrustedPeer(
+                    Settings.EffectiveTrustedPeers,
+                    new TrustedSaveSyncPeer(redemption.PeerDeviceId.Value, "Paired device", Settings.PeerAddress!, credentialReference, TrustedPeerState.Active, now, now)),
                 PendingInvitationId = null,
                 PendingInvitationExpiresAtUtc = null,
                 PendingCodeSalt = null,
@@ -131,7 +193,12 @@ public sealed class SaveSyncCoordinator(
             },
         };
         var save = await store.SaveAsync(staged, cancellationToken).ConfigureAwait(false);
-        if (save.Status != DocumentSaveStatus.Saved) { secrets.Clear(); return save.Error ?? "The invitation could not be accepted atomically."; }
+        if (save.Status != DocumentSaveStatus.Saved)
+        {
+            secrets.Clear();
+            peerCredentials?.Clear(redemption.PeerDeviceId.Value);
+            return save.Error ?? "The invitation could not be accepted atomically.";
+        }
         _document = staged;
         await EnsureTransportStartedAsync(cancellationToken).ConfigureAwait(false);
         return null;
@@ -139,14 +206,43 @@ public sealed class SaveSyncCoordinator(
 
     public async Task<string?> RevokePeerAsync(CancellationToken cancellationToken)
     {
+        if (Settings.PeerDeviceId is not { } peerDeviceId) return null;
+        return await RevokePeerAsync(peerDeviceId, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<string?> RenamePeerAsync(Guid peerDeviceId, string displayName, CancellationToken cancellationToken)
+    {
+        var normalized = displayName.Trim();
+        if (peerDeviceId == Guid.Empty || normalized.Length is < 1 or > 100 || normalized.Any(char.IsControl))
+            return "The trusted device name is invalid.";
+        return await MutateTrustedPeerAsync(peerDeviceId, peer => peer with { DisplayName = normalized }, "The trusted device could not be renamed.", cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<string?> SetPeerPausedAsync(Guid peerDeviceId, bool paused, CancellationToken cancellationToken) =>
+        MutateTrustedPeerAsync(peerDeviceId, peer => peer with { State = paused ? TrustedPeerState.Paused : TrustedPeerState.Active },
+            paused ? "The trusted device could not be paused." : "The trusted device could not be resumed.", cancellationToken);
+
+    public Task<string?> RotatePeerCredentialAsync(Guid peerDeviceId, CancellationToken cancellationToken) =>
+        Task.FromResult<string?>("Credential rotation requires the peer to be online and is not available until the authenticated rotation handshake is completed.");
+
+    public async Task<string?> RevokePeerAsync(Guid peerDeviceId, CancellationToken cancellationToken)
+    {
         await _identityGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            var existing = Settings.EffectiveTrustedPeers.FirstOrDefault(peer => peer.DeviceId == peerDeviceId);
+            if (existing is null && Settings.PeerDeviceId != peerDeviceId) return "The trusted device no longer exists.";
+            var trustedPeers = Settings.EffectiveTrustedPeers
+                .Select(peer => peer.DeviceId == peerDeviceId ? peer with { State = TrustedPeerState.Revoked } : peer)
+                .ToArray();
+            var isLegacyPeer = Settings.PeerDeviceId == peerDeviceId;
             var staged = _document with
             {
                 Settings = Settings with
                 {
-                    PeerDeviceId = null,
+                    PeerDeviceId = isLegacyPeer ? null : Settings.PeerDeviceId,
+                    PeerAddress = isLegacyPeer ? null : Settings.PeerAddress,
+                    TrustedPeers = trustedPeers,
                     PendingInvitationId = null,
                     PendingInvitationExpiresAtUtc = null,
                     PendingCodeSalt = null,
@@ -157,7 +253,8 @@ public sealed class SaveSyncCoordinator(
             var save = await store.SaveAsync(staged, cancellationToken).ConfigureAwait(false);
             if (save.Status != DocumentSaveStatus.Saved) return save.Error ?? "The paired device could not be revoked.";
             _document = staged;
-            secrets.Clear();
+            peerCredentials?.Clear(peerDeviceId);
+            if (isLegacyPeer) secrets.Clear();
             return null;
         }
         finally { _identityGate.Release(); }
@@ -182,7 +279,6 @@ public sealed class SaveSyncCoordinator(
     public async Task<string?> RetryListenerAsync(CancellationToken cancellationToken)
     {
         if (!HasActiveCredentials) return "Generate an invitation or complete pairing before starting the listener.";
-        if (string.IsNullOrWhiteSpace(Settings.PeerAddress)) return "Enter and save the other device's Tailscale IP first.";
         try
         {
             await transport.StartAsync(this, cancellationToken).ConfigureAwait(false);
@@ -194,6 +290,7 @@ public sealed class SaveSyncCoordinator(
     public (Guid? Identity, string? Error) DeriveSharedSaveIdentity(string label, string platform)
     {
         if (!IsPaired) return (null, "Pair the devices before linking a game automatically.");
+        if (ActivePeers().Length != 1) return (null, "Automatic pair-derived links are available only with one active peer. Use one shared save identity across every selected device.");
         var normalizedLabel = NormalizeIdentityText(label);
         var normalizedPlatform = NormalizeIdentityText(platform);
         if (normalizedLabel.Length is < 1 or > 200 || normalizedPlatform.Length is < 1 or > 100)
@@ -220,7 +317,7 @@ public sealed class SaveSyncCoordinator(
             cancellationToken.ThrowIfCancellationRequested();
             var payload = await LoadSnapshotAsync(pending.GameId, pending.HeadSnapshotId!.Value, fullContent: false, cancellationToken).ConfigureAwait(false);
             if (payload is null) continue;
-            var pushed = await transport.PushAsync(payload, cancellationToken).ConfigureAwait(false);
+            var pushed = await PushToActivePeersAsync(payload, cancellationToken).ConfigureAwait(false);
             if (!pushed.Success) continue;
             await SetStateAsync(pending with { Status = "Peer acknowledged" }, cancellationToken).ConfigureAwait(false);
             completed++;
@@ -239,7 +336,7 @@ public sealed class SaveSyncCoordinator(
             var syncGameId = GetSyncGameId(game);
             var state = FindState(syncGameId);
             var local = await ScanAsync(game.SaveDirectory!, cancellationToken).ConfigureAwait(false);
-            var pull = await transport.PullAsync(syncGameId, state?.HeadSnapshotId, cancellationToken).ConfigureAwait(false);
+            var pull = await PullFromActivePeersAsync(syncGameId, state?.HeadSnapshotId, cancellationToken).ConfigureAwait(false);
             if (!pull.Success) return new(pull.Conflict ? SaveSyncStatus.Conflict : SaveSyncStatus.QueuedOffline, pull.Error ?? "The peer is unavailable.");
             if (pull.Snapshot is null) return new(SaveSyncStatus.Unchanged, "The peer has no newer save snapshot.");
             if ((state is null && local.Count > 0 && !FileSetsEqual(local, pull.Snapshot.Manifest.Files)) ||
@@ -253,7 +350,7 @@ public sealed class SaveSyncCoordinator(
             await SetStateAsync(new(syncGameId, pull.Snapshot.Manifest.SnapshotId, pull.Snapshot.Manifest.Files, "Downloaded"), cancellationToken).ConfigureAwait(false);
             return new(SaveSyncStatus.Applied, "A verified peer snapshot was restored after creating a local backup.", pull.Snapshot.Manifest.SnapshotId);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException or InvalidDataException)
         { return new(SaveSyncStatus.Failed, exception.Message); }
         finally { _gate.Release(); }
     }
@@ -277,7 +374,7 @@ public sealed class SaveSyncCoordinator(
             await StoreSnapshotAsync(payload, cancellationToken).ConfigureAwait(false);
             await SetStateAsync(new(payload.Manifest.GameId, payload.Manifest.SnapshotId, files, "Pending upload"), cancellationToken).ConfigureAwait(false);
             if (!transport.IsConfigured || !IsPaired) return new(SaveSyncStatus.QueuedOffline, "A local snapshot was created and queued until the peer is available.", payload.Manifest.SnapshotId);
-            var push = await transport.PushAsync(payload, cancellationToken).ConfigureAwait(false);
+            var push = await PushToActivePeersAsync(payload, cancellationToken).ConfigureAwait(false);
             var status = push.Success ? "Peer acknowledged" : push.Conflict ? "Conflict" : "Pending upload";
             await SetStateAsync(new(payload.Manifest.GameId, payload.Manifest.SnapshotId, files, status, push.Conflict ? payload.Manifest.SnapshotId.ToString("N") : null), cancellationToken).ConfigureAwait(false);
             return push.Success
@@ -321,7 +418,7 @@ public sealed class SaveSyncCoordinator(
             var baseState = new SaveSyncGameState(syncGameId, remote.Manifest.SnapshotId, remote.Manifest.Files, "Resolving local");
             var localPayload = await CreatePayloadAsync(game, baseState, local, cancellationToken).ConfigureAwait(false);
             await StoreSnapshotAsync(localPayload, cancellationToken).ConfigureAwait(false);
-            var pushed = await transport.PushAsync(localPayload, cancellationToken).ConfigureAwait(false);
+            var pushed = await PushToActivePeersAsync(localPayload, cancellationToken).ConfigureAwait(false);
             await SetStateAsync(new(syncGameId, localPayload.Manifest.SnapshotId, local, pushed.Success ? "Peer acknowledged" : "Pending upload"), cancellationToken).ConfigureAwait(false);
             return new(pushed.Success ? SaveSyncStatus.SnapshotCreated : SaveSyncStatus.QueuedOffline,
                 pushed.Success ? "The local save was chosen and sent as a new generation; the remote conflict remains retained." : "The local choice was queued until the peer is available.", localPayload.Manifest.SnapshotId);
@@ -338,6 +435,8 @@ public sealed class SaveSyncCoordinator(
         {
             ValidatePayload(snapshot);
             var hosted = await LoadHeadAsync(snapshot.Manifest.GameId, cancellationToken).ConfigureAwait(false);
+            if (hosted?.Manifest.SnapshotId == snapshot.Manifest.SnapshotId)
+                return new(true, false, null, null);
             if (hosted?.Manifest.SnapshotId != snapshot.Manifest.ParentSnapshotId)
                 return new(false, true, null, "The peer head diverged; the incoming snapshot was retained only by its sender.");
             await StoreSnapshotAsync(snapshot, cancellationToken).ConfigureAwait(false);
@@ -351,6 +450,8 @@ public sealed class SaveSyncCoordinator(
     public async Task<bool> AuthorizePeerAsync(Guid deviceId, CancellationToken cancellationToken)
     {
         if (deviceId == Guid.Empty || deviceId == Settings.DeviceId) return false;
+        var trusted = Settings.EffectiveTrustedPeers.FirstOrDefault(peer => peer.DeviceId == deviceId);
+        if (trusted is not null && trusted.State != TrustedPeerState.Active) return false;
         if (Settings.PeerDeviceId is { } pinned)
         {
             if (pinned != deviceId) return false;
@@ -370,10 +471,8 @@ public sealed class SaveSyncCoordinator(
         await _identityGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (Settings.PeerDeviceId is { } pinned)
-            {
-                if (pinned != requestingDeviceId) return new(false, null, null, "This invitation was already consumed by another device.");
-            }
+            if (Settings.EffectiveTrustedPeers.Any(peer => peer.DeviceId == requestingDeviceId && peer.State == TrustedPeerState.Active))
+                return new(false, null, null, "This device is already trusted; create a fresh invitation only when re-pairing is required.");
             if (Settings.PendingInvitationId is null || Settings.PendingInvitationExpiresAtUtc <= timeProvider.GetUtcNow() ||
                 Settings.PendingCodeSalt is null || Settings.PendingCodeHash is null)
                 return new(false, null, null, "The invitation is missing or expired.");
@@ -402,13 +501,39 @@ public sealed class SaveSyncCoordinator(
                 if (secret is not null) CryptographicOperations.ZeroMemory(secret);
                 return new(false, null, null, "The invitation credential is unavailable.");
             }
-            if (Settings.PeerDeviceId is null)
+            if (!TailscalePeerValidator.TryNormalize(Settings.PeerAddress ?? string.Empty, out var peerAddress, out _))
+                return new(false, null, null, "Save the requesting device's Tailscale address before accepting its invitation redemption.");
+            var credentialReference = "NovaLauncher.SaveSync.LegacyPeer";
+            var credentialCopied = false;
+            if (peerCredentials is not null)
             {
-                var staged = _document with { Settings = Settings with { PeerDeviceId = requestingDeviceId, LastConsumedInvitationId = Settings.PendingInvitationId } };
-                var save = await store.SaveAsync(staged, cancellationToken).ConfigureAwait(false);
-                if (save.Status != DocumentSaveStatus.Saved) return new(false, null, null, "The first-device identity could not be pinned atomically.");
-                _document = staged;
+                peerCredentials.SetSecret(requestingDeviceId, secret);
+                credentialReference = peerCredentials.GetCredentialReference(requestingDeviceId);
+                credentialCopied = true;
             }
+            var now = timeProvider.GetUtcNow();
+            var staged = _document with
+            {
+                Settings = Settings with
+                {
+                    PeerDeviceId = Settings.PeerDeviceId ?? requestingDeviceId,
+                    LastConsumedInvitationId = Settings.PendingInvitationId,
+                    PendingInvitationId = null,
+                    PendingInvitationExpiresAtUtc = null,
+                    PendingCodeSalt = null,
+                    PendingCodeHash = null,
+                    PendingCodeFailedAttempts = 0,
+                    TrustedPeers = UpsertTrustedPeer(Settings.EffectiveTrustedPeers,
+                    new TrustedSaveSyncPeer(requestingDeviceId, "Paired device", peerAddress, credentialReference, TrustedPeerState.Active, now, now)),
+                }
+            };
+            var save = await store.SaveAsync(staged, cancellationToken).ConfigureAwait(false);
+            if (save.Status != DocumentSaveStatus.Saved)
+            {
+                if (credentialCopied) peerCredentials!.Clear(requestingDeviceId);
+                return new(false, null, null, "The device identity could not be pinned atomically.");
+            }
+            _document = staged;
             return new(true, Settings.DeviceId, secret, null, 0);
         }
         finally { _identityGate.Release(); }
@@ -422,12 +547,120 @@ public sealed class SaveSyncCoordinator(
             : new(true, false, head, null);
     }
 
+    public async Task<IReadOnlyList<SaveSnapshotHistoryItem>> GetSnapshotHistoryAsync(GameId gameId, CancellationToken cancellationToken)
+    {
+        if (gameId.Value == Guid.Empty) return [];
+        var gameRoot = Path.Combine(_snapshotRoot, gameId.Value.ToString("N"));
+        if (!Directory.Exists(gameRoot)) return [];
+        Guid? head = null;
+        var headPath = Path.Combine(gameRoot, "head.txt");
+        if (File.Exists(headPath) && Guid.TryParse(await File.ReadAllTextAsync(headPath, cancellationToken).ConfigureAwait(false), out var parsedHead)) head = parsedHead;
+        var history = new List<SaveSnapshotHistoryItem>();
+        foreach (var directory in Directory.EnumerateDirectories(gameRoot).OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).Take(MaximumRetainedSnapshotsPerGame))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var name = Path.GetFileName(directory);
+            if (!Guid.TryParse(name, out var snapshotId)) continue;
+            try
+            {
+                var manifestPath = Path.Combine(directory, "manifest.txt");
+                var manifest = ParseManifest(await File.ReadAllTextAsync(manifestPath, cancellationToken).ConfigureAwait(false));
+                if (manifest.SnapshotId != snapshotId || manifest.GameId != gameId) throw new InvalidDataException("Snapshot identity does not match its directory.");
+                long total = 0;
+                foreach (var file in manifest.Files)
+                {
+                    total += file.Length;
+                    var path = SafeCombine(directory, file.RelativePath);
+                    if (!File.Exists(path) || !string.Equals(await HashFileAsync(path, cancellationToken).ConfigureAwait(false), file.Sha256, StringComparison.Ordinal))
+                        throw new InvalidDataException($"Integrity check failed for {file.RelativePath}.");
+                }
+                history.Add(new(snapshotId, manifest.ParentSnapshotId, manifest.DeviceId, manifest.CreatedAtUtc, manifest.Files.Count, total, head == snapshotId, true, null));
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
+            {
+                history.Add(new(snapshotId, null, Guid.Empty, DateTimeOffset.MinValue, 0, 0, head == snapshotId, false, exception.Message));
+            }
+        }
+        return history.OrderByDescending(static item => item.CreatedAtUtc).ThenByDescending(static item => item.SnapshotId).ToArray();
+    }
+
+    public async Task<SaveSyncResult> RestoreSnapshotAsync(LibraryItem game, Guid snapshotId, CancellationToken cancellationToken)
+    {
+        if (snapshotId == Guid.Empty) return new(SaveSyncStatus.Failed, "Choose a valid snapshot to restore.");
+        var validation = ValidateGame(game);
+        if (validation is not null) return validation;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var syncGameId = GetSyncGameId(game);
+            var payload = await LoadSnapshotAsync(syncGameId, snapshotId, fullContent: true, cancellationToken).ConfigureAwait(false);
+            if (payload is null) return new(SaveSyncStatus.Failed, "The selected snapshot is no longer available.");
+            ValidatePayload(payload);
+            await RestoreAtomicallyAsync(game.SaveDirectory!, payload, cancellationToken).ConfigureAwait(false);
+            await SetStateAsync(new(syncGameId, snapshotId, payload.Manifest.Files, "Restored from history"), cancellationToken).ConfigureAwait(false);
+            return new(SaveSyncStatus.Applied, "The verified snapshot was restored after creating a backup of the current save folder.", snapshotId);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException or InvalidDataException)
+        { return new(SaveSyncStatus.Failed, exception.Message); }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<SaveRestoreHistoryItem>> GetRestoreHistoryAsync(GameId gameId, CancellationToken cancellationToken)
+    {
+        if (gameId.Value == Guid.Empty) return [];
+        var root = Path.Combine(_snapshotRoot, "backups", gameId.Value.ToString("N"));
+        if (!Directory.Exists(root)) return [];
+        var history = new List<SaveRestoreHistoryItem>();
+        foreach (var path in Directory.EnumerateFiles(root, "restore.json", SearchOption.AllDirectories)
+                     .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                     .Take(MaximumRetainedRestoreBackupsPerGame))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var item = System.Text.Json.JsonSerializer.Deserialize<SaveRestoreHistoryItem>(
+                    await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false));
+                if (item is not null && item.GameId == gameId && item.OperationId != Guid.Empty) history.Add(item);
+            }
+            catch (Exception exception) when (exception is IOException or System.Text.Json.JsonException) { /* Corrupt history is omitted, never restored. */ }
+        }
+        return history.OrderByDescending(static item => item.CreatedAtUtc).ThenByDescending(static item => item.OperationId).ToArray();
+    }
+
     public static bool IsSafeRelativePath(string path)
     {
         if (string.IsNullOrWhiteSpace(path) || Path.IsPathFullyQualified(path) || path.Length > 1024 || path.Contains(':')) return false;
         var normalized = path.Replace('\\', '/');
         return normalized.Split('/').All(static part => part.Length > 0 && part is not "." and not "..");
     }
+
+    private async Task<string?> MutateTrustedPeerAsync(
+        Guid peerDeviceId,
+        Func<TrustedSaveSyncPeer, TrustedSaveSyncPeer> mutation,
+        string failureMessage,
+        CancellationToken cancellationToken)
+    {
+        if (peerDeviceId == Guid.Empty) return "The trusted device identity is invalid.";
+        await _identityGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var index = Settings.EffectiveTrustedPeers.ToList().FindIndex(peer => peer.DeviceId == peerDeviceId);
+            if (index < 0) return "The trusted device no longer exists.";
+            var peers = Settings.EffectiveTrustedPeers.ToArray();
+            peers[index] = mutation(peers[index]);
+            var staged = _document with { Settings = Settings with { TrustedPeers = peers } };
+            var save = await store.SaveAsync(staged, cancellationToken).ConfigureAwait(false);
+            if (save.Status != DocumentSaveStatus.Saved) return save.Error ?? failureMessage;
+            _document = staged;
+            return null;
+        }
+        finally { _identityGate.Release(); }
+    }
+
+    private static TrustedSaveSyncPeer[] UpsertTrustedPeer(
+        IReadOnlyList<TrustedSaveSyncPeer> peers,
+        TrustedSaveSyncPeer replacement) =>
+        peers.Where(peer => peer.DeviceId != replacement.DeviceId).Append(replacement).OrderBy(peer => peer.DeviceId).ToArray();
 
     private SaveSyncResult? ValidateGame(LibraryItem game)
     {
@@ -482,11 +715,13 @@ public sealed class SaveSyncCoordinator(
     private async Task RestoreAtomicallyAsync(string destination, SaveSnapshotPayload payload, CancellationToken cancellationToken)
     {
         ValidatePayload(payload);
-        var operation = Guid.NewGuid().ToString("N");
+        var operationId = Guid.NewGuid();
+        var operation = operationId.ToString("N");
         var stage = Path.Combine(_snapshotRoot, "staging", operation);
-        var backup = Path.Combine(_snapshotRoot, "backups", operation);
+        var backup = Path.Combine(_snapshotRoot, "backups", payload.Manifest.GameId.Value.ToString("N"), operation);
         Directory.CreateDirectory(stage);
         Directory.CreateDirectory(backup);
+        SaveRestoreHistoryItem? restoreHistory = null;
         try
         {
             foreach (var file in payload.Manifest.Files)
@@ -498,13 +733,19 @@ public sealed class SaveSyncCoordinator(
                 await File.WriteAllBytesAsync(target, bytes, cancellationToken).ConfigureAwait(false);
                 if (!string.Equals(Hash(bytes), file.Sha256, StringComparison.Ordinal)) throw new InvalidDataException("A restored save failed integrity verification.");
             }
+            var backupCount = 0;
+            long backupBytes = 0;
             foreach (var existing in Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories))
             {
                 var relative = Path.GetRelativePath(destination, existing);
                 var target = SafeCombine(backup, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.Copy(existing, target, true);
+                backupCount++;
+                backupBytes += new FileInfo(existing).Length;
             }
+            restoreHistory = new(operationId, payload.Manifest.GameId, payload.Manifest.SnapshotId, timeProvider.GetUtcNow(), backupCount, backupBytes, "Prepared");
+            await WriteRestoreHistoryAsync(backup, restoreHistory, cancellationToken).ConfigureAwait(false);
             foreach (var file in payload.Manifest.Files)
             {
                 var source = SafeCombine(stage, file.RelativePath);
@@ -517,19 +758,31 @@ public sealed class SaveSyncCoordinator(
                 var target = SafeCombine(destination, deleted);
                 if (File.Exists(target)) File.Delete(target);
             }
+            restoreHistory = restoreHistory with { Outcome = "Completed" };
+            await WriteRestoreHistoryAsync(backup, restoreHistory, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
             foreach (var file in Directory.Exists(backup) ? Directory.EnumerateFiles(backup, "*", SearchOption.AllDirectories) : [])
             {
+                if (string.Equals(Path.GetFileName(file), "restore.json", StringComparison.OrdinalIgnoreCase)) continue;
                 var relative = Path.GetRelativePath(backup, file);
                 var target = SafeCombine(destination, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.Copy(file, target, true);
             }
+            if (restoreHistory is not null)
+            {
+                try { await WriteRestoreHistoryAsync(backup, restoreHistory with { Outcome = "Rolled back" }, CancellationToken.None).ConfigureAwait(false); }
+                catch (IOException) { /* Preserve the backup even when its optional history marker cannot be updated. */ }
+            }
             throw;
         }
-        finally { if (Directory.Exists(stage)) Directory.Delete(stage, true); }
+        finally
+        {
+            if (Directory.Exists(stage)) Directory.Delete(stage, true);
+            EnforceBackupRetention(payload.Manifest.GameId);
+        }
     }
 
     private async Task StoreSnapshotAsync(SaveSnapshotPayload payload, CancellationToken cancellationToken)
@@ -554,6 +807,7 @@ public sealed class SaveSyncCoordinator(
             Directory.CreateDirectory(Path.GetDirectoryName(directory)!);
             Directory.Move(stage, directory);
             await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(directory)!, "head.txt"), payload.Manifest.SnapshotId.ToString("N"), cancellationToken).ConfigureAwait(false);
+            EnforceSnapshotRetention(payload.Manifest.GameId, payload.Manifest.SnapshotId);
         }
         finally { if (Directory.Exists(stage)) Directory.Delete(stage, true); }
     }
@@ -627,6 +881,53 @@ public sealed class SaveSyncCoordinator(
             if (!IsSafeRelativePath(path) || bytes.LongLength > MaximumFileBytes || !payload.Manifest.Files.Any(file => string.Equals(file.RelativePath, path, StringComparison.OrdinalIgnoreCase) && file.Length == bytes.LongLength && file.Sha256 == Hash(bytes))) throw new InvalidDataException("Changed snapshot content failed validation.");
     }
 
+    private TrustedSaveSyncPeer[] ActivePeers() => Settings.EffectiveTrustedPeers
+        .Where(peer => peer.State == TrustedPeerState.Active &&
+            (peerCredentials?.ContainsSecret(peer.DeviceId) == true ||
+             (Settings.PeerDeviceId == peer.DeviceId && secrets.HasSecret)))
+        .OrderBy(peer => peer.DeviceId)
+        .ToArray();
+
+    private async Task<TransportResult> PushToActivePeersAsync(SaveSnapshotPayload payload, CancellationToken cancellationToken)
+    {
+        var peers = ActivePeers();
+        if (peers.Length == 0) return new(false, false, null, "No active trusted save-sync device is available.");
+        var failures = new List<string>();
+        foreach (var peer in peers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await transport.PushAsync(peer, payload, cancellationToken).ConfigureAwait(false);
+            if (result.Conflict) return new(false, true, null, $"{peer.DisplayName}: {result.Error ?? "generation conflict"}");
+            if (!result.Success) failures.Add($"{peer.DisplayName}: {result.Error ?? "unavailable"}");
+        }
+        return failures.Count == 0
+            ? new(true, false, null, null)
+            : new(false, false, null, $"Partial fan-out remains queued ({string.Join("; ", failures)}). No failed peer was marked acknowledged.");
+    }
+
+    private async Task<TransportResult> PullFromActivePeersAsync(GameId gameId, Guid? knownHead, CancellationToken cancellationToken)
+    {
+        var peers = ActivePeers();
+        if (peers.Length == 0) return new(false, false, null, "No active trusted save-sync device is available.");
+        var snapshots = new List<(TrustedSaveSyncPeer Peer, SaveSnapshotPayload Snapshot)>();
+        var failures = new List<string>();
+        foreach (var peer in peers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await transport.PullAsync(peer, gameId, knownHead, cancellationToken).ConfigureAwait(false);
+            if (result.Conflict) return new(false, true, null, $"{peer.DisplayName}: {result.Error ?? "generation conflict"}");
+            if (!result.Success) failures.Add($"{peer.DisplayName}: {result.Error ?? "unavailable"}");
+            else if (result.Snapshot is not null) snapshots.Add((peer, result.Snapshot));
+        }
+        var distinctHeads = snapshots.Select(item => item.Snapshot.Manifest.SnapshotId).Distinct().ToArray();
+        if (distinctHeads.Length > 1)
+            return new(false, true, null, "Trusted devices reported divergent save generations. Fan-out is blocked until the conflict is resolved explicitly.");
+        if (snapshots.Count > 0) return new(true, false, snapshots[0].Snapshot, null);
+        return failures.Count == peers.Length
+            ? new(false, false, null, $"All trusted devices are unavailable ({string.Join("; ", failures)}).")
+            : new(true, false, null, null);
+    }
+
     private SaveSyncGameState? FindState(GameId gameId) => Settings.Games.FirstOrDefault(game => game.GameId == gameId);
     private static GameId GetSyncGameId(LibraryItem game) => game.SaveSyncId is { } shared ? new GameId(shared) : game.Id;
     private async Task SetStateAsync(SaveSyncGameState state, CancellationToken cancellationToken)
@@ -639,7 +940,7 @@ public sealed class SaveSyncCoordinator(
     }
     private async Task EnsureTransportStartedAsync(CancellationToken token)
     {
-        if (!HasActiveCredentials || string.IsNullOrWhiteSpace(Settings.PeerAddress)) return;
+        if (!HasActiveCredentials) return;
         try { await transport.StartAsync(this, token).ConfigureAwait(false); }
         catch (InvalidOperationException) { /* ListenerStatus exposes the failure; configuration remains available for retry. */ }
     }
@@ -667,6 +968,40 @@ public sealed class SaveSyncCoordinator(
         finally { _identityGate.Release(); }
     }
     private string SnapshotDirectory(GameId gameId, Guid id) => Path.Combine(_snapshotRoot, gameId.Value.ToString("N"), id.ToString("N"));
+    private void EnforceSnapshotRetention(GameId gameId, Guid headSnapshotId)
+    {
+        var gameRoot = Path.Combine(_snapshotRoot, gameId.Value.ToString("N"));
+        if (!Directory.Exists(gameRoot)) return;
+        var snapshots = Directory.EnumerateDirectories(gameRoot)
+            .Select(path => (Path: path, Id: Guid.TryParse(Path.GetFileName(path), out var id) ? id : Guid.Empty, Created: ReadSnapshotCreatedAt(path)))
+            .Where(static item => item.Id != Guid.Empty)
+            .OrderByDescending(static item => item.Created)
+            .ThenByDescending(static item => item.Id)
+            .ToArray();
+        var retained = new HashSet<Guid> { headSnapshotId };
+        foreach (var snapshot in snapshots.Where(item => item.Id != headSnapshotId).Take(MaximumRetainedSnapshotsPerGame - 1)) retained.Add(snapshot.Id);
+        foreach (var obsolete in snapshots.Where(item => !retained.Contains(item.Id)))
+            Directory.Delete(obsolete.Path, recursive: true);
+    }
+
+    private static DateTimeOffset ReadSnapshotCreatedAt(string directory)
+    {
+        try { return ParseManifest(File.ReadAllText(Path.Combine(directory, "manifest.txt"))).CreatedAtUtc; }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or System.Text.Json.JsonException) { return DateTimeOffset.MinValue; }
+    }
+    private static Task WriteRestoreHistoryAsync(string backup, SaveRestoreHistoryItem item, CancellationToken cancellationToken) =>
+        File.WriteAllTextAsync(Path.Combine(backup, "restore.json"), System.Text.Json.JsonSerializer.Serialize(item), cancellationToken);
+
+    private void EnforceBackupRetention(GameId gameId)
+    {
+        var root = Path.Combine(_snapshotRoot, "backups", gameId.Value.ToString("N"));
+        if (!Directory.Exists(root)) return;
+        var backups = Directory.EnumerateDirectories(root)
+            .OrderByDescending(static path => Directory.GetCreationTimeUtc(path))
+            .ThenByDescending(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        foreach (var obsolete in backups.Skip(MaximumRetainedRestoreBackupsPerGame)) Directory.Delete(obsolete, recursive: true);
+    }
     private static string SafeCombine(string root, string relative) { if (!IsSafeRelativePath(relative)) throw new InvalidDataException("Unsafe relative path."); var full = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar))); var normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)); if (!full.StartsWith(normalized + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Path escaped its root."); return full; }
     private static bool FileSetsEqual(IReadOnlyList<SaveFileEntry> left, IReadOnlyList<SaveFileEntry> right) => left.Count == right.Count && left.Zip(right).All(pair => pair.First == pair.Second);
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();

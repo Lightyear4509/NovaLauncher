@@ -5,15 +5,22 @@ using NovaLauncher.Application.SaveSync;
 
 namespace NovaLauncher.Infrastructure.SaveSync;
 
-public sealed class WindowsCredentialPairingSecretStore : IPairingSecretStore
+public sealed class WindowsCredentialPairingSecretStore : IPairingSecretStore, IPeerCredentialStore
 {
     private const string Target = "NovaLauncher/SaveSyncPairingSecret";
-    public bool HasSecret => GetSecret() is { Length: 32 };
+    private const string PeerTargetPrefix = "NovaLauncher/SaveSyncPeer/";
+    public bool HasSecret => ReadSecret(Target) is { Length: 32 };
 
-    public byte[]? GetSecret()
+    public byte[]? GetSecret() => ReadSecret(Target);
+
+    public bool ContainsSecret(Guid peerDeviceId) => GetSecret(peerDeviceId) is { Length: 32 };
+
+    public byte[]? GetSecret(Guid peerDeviceId) => ReadSecret(GetTarget(peerDeviceId));
+
+    private static byte[]? ReadSecret(string target)
     {
         if (!OperatingSystem.IsWindows()) return null;
-        if (!CredRead(Target, 1, 0, out var pointer)) return null;
+        if (!CredRead(target, 1, 0, out var pointer)) return null;
         try
         {
             var credential = Marshal.PtrToStructure<Credential>(pointer);
@@ -25,7 +32,11 @@ public sealed class WindowsCredentialPairingSecretStore : IPairingSecretStore
         finally { CredFree(pointer); }
     }
 
-    public void SetSecret(ReadOnlySpan<byte> secret)
+    public void SetSecret(ReadOnlySpan<byte> secret) => WriteSecret(Target, secret);
+
+    public void SetSecret(Guid peerDeviceId, ReadOnlySpan<byte> secret) => WriteSecret(GetTarget(peerDeviceId), secret);
+
+    private static void WriteSecret(string target, ReadOnlySpan<byte> secret)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows Credential Manager is required.");
         if (secret.Length != 32) throw new ArgumentException("A 256-bit pairing secret is required.", nameof(secret));
@@ -37,7 +48,7 @@ public sealed class WindowsCredentialPairingSecretStore : IPairingSecretStore
             var credential = new Credential
             {
                 Type = 1,
-                TargetName = Target,
+                TargetName = target,
                 CredentialBlobSize = (uint)bytes.Length,
                 CredentialBlob = blob,
                 Persist = 2,
@@ -48,10 +59,22 @@ public sealed class WindowsCredentialPairingSecretStore : IPairingSecretStore
         finally { Marshal.FreeCoTaskMem(blob); CryptographicOperations.ZeroMemory(bytes); }
     }
 
-    public void Clear()
+    public void Clear() => DeleteSecret(Target);
+
+    public void Clear(Guid peerDeviceId) => DeleteSecret(GetTarget(peerDeviceId));
+
+    public string GetCredentialReference(Guid peerDeviceId) => GetTarget(peerDeviceId);
+
+    private static void DeleteSecret(string target)
     {
-        if (OperatingSystem.IsWindows() && !CredDelete(Target, 1, 0) && Marshal.GetLastWin32Error() != 1168)
+        if (OperatingSystem.IsWindows() && !CredDelete(target, 1, 0) && Marshal.GetLastWin32Error() != 1168)
             throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    private static string GetTarget(Guid peerDeviceId)
+    {
+        if (peerDeviceId == Guid.Empty) throw new ArgumentException("A peer device ID is required.", nameof(peerDeviceId));
+        return PeerTargetPrefix + peerDeviceId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

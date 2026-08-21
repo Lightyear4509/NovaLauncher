@@ -210,6 +210,15 @@ public sealed partial class MainWindow : Window
     private async void OnRevokePairedDevice(object? sender, RoutedEventArgs e) =>
         await ExecuteAsync(() => ViewModel.Workspace!.RevokePairedDeviceAsync(_lifetimeCancellation.Token));
 
+    private async void OnRenameTrustedPeer(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.RenameSelectedTrustedPeerAsync(_lifetimeCancellation.Token));
+
+    private async void OnToggleTrustedPeer(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.ToggleSelectedTrustedPeerAsync(_lifetimeCancellation.Token));
+
+    private async void OnRevokeTrustedPeer(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.RevokeSelectedTrustedPeerAsync(_lifetimeCancellation.Token));
+
     private void OnRefreshPairingStatus(object? sender, RoutedEventArgs e)
     {
         ViewModel.Workspace!.RefreshSaveSyncPairingState();
@@ -315,6 +324,12 @@ public sealed partial class MainWindow : Window
 
     private async void OnKeepBothSaves(object? sender, RoutedEventArgs e) =>
         await ExecuteAsync(() => ViewModel.Workspace!.ResolveSaveConflictAsync(SaveConflictChoice.KeepBoth, _lifetimeCancellation.Token));
+
+    private async void OnRefreshSnapshotHistory(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.RefreshSelectedSnapshotHistoryAsync(_lifetimeCancellation.Token));
+
+    private async void OnRestoreSelectedSnapshot(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.RestoreSelectedSnapshotAsync(_lifetimeCancellation.Token));
 
     private void OnGameSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {

@@ -10,6 +10,7 @@ using NovaLauncher.Application.Achievements;
 using NovaLauncher.Domain.Achievements;
 using NovaLauncher.Application.Themes;
 using NovaLauncher.Application.SaveSync;
+using NovaLauncher.Domain.SaveSync;
 
 namespace NovaLauncher.Application.Library;
 
@@ -91,6 +92,9 @@ public sealed class LibraryWorkspaceViewModel(
     private const int LibraryRenderPageSize = 200;
     private const int MaximumDuplicateReviewPairs = 100;
     private bool _duplicateReviewTruncated;
+    private SaveSnapshotHistoryItem? _selectedSaveSnapshot;
+    private TrustedSaveSyncPeer? _selectedTrustedPeer;
+    private string _trustedPeerName = string.Empty;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -114,6 +118,33 @@ public sealed class LibraryWorkspaceViewModel(
     public ObservableCollection<GameIdentityCandidate> IdentityCandidates { get; } = [];
     public ObservableCollection<string> IdentitySearchFailures { get; } = [];
     public ObservableCollection<ArtworkCandidate> ArtworkVariants { get; } = [];
+    public ObservableCollection<SaveSnapshotHistoryItem> SaveSnapshotHistory { get; } = [];
+    public ObservableCollection<SaveRestoreHistoryItem> SaveRestoreHistory { get; } = [];
+    public ObservableCollection<TrustedSaveSyncPeer> TrustedSaveSyncPeers { get; } = [];
+
+    public TrustedSaveSyncPeer? SelectedTrustedPeer
+    {
+        get => _selectedTrustedPeer;
+        set
+        {
+            if (Set(ref _selectedTrustedPeer, value))
+            {
+                TrustedPeerName = value?.DisplayName ?? string.Empty;
+                OnPropertyChanged(nameof(HasSelectedTrustedPeer));
+            }
+        }
+    }
+
+    public string TrustedPeerName { get => _trustedPeerName; set => Set(ref _trustedPeerName, value); }
+    public bool HasSelectedTrustedPeer => SelectedTrustedPeer is not null;
+
+    public SaveSnapshotHistoryItem? SelectedSaveSnapshot
+    {
+        get => _selectedSaveSnapshot;
+        set { if (Set(ref _selectedSaveSnapshot, value)) OnPropertyChanged(nameof(CanRestoreSelectedSnapshot)); }
+    }
+
+    public bool CanRestoreSelectedSnapshot => SelectedGame is not null && SelectedSaveSnapshot?.IntegrityValid == true;
 
     public IReadOnlyList<string> SortOptions { get; } = ["Name", "Recently played", "Date added", "Playtime", "Release date", "Platform", "Recently updated"];
 
@@ -168,7 +199,7 @@ public sealed class LibraryWorkspaceViewModel(
     public string SaveSyncIdentity => saveSync is null ? "Unavailable" : $"{saveSync.Settings.DeviceName} · {saveSync.Settings.DeviceId:N}";
 
     public string SaveSyncPairingStatus => saveSync?.IsPaired == true
-        ? $"Paired with device {saveSync.Settings.PeerDeviceId:N}. Future authenticated connections are automatic."
+        ? $"{saveSync.Settings.EffectiveTrustedPeers.Count(peer => peer.State == TrustedPeerState.Active)} active trusted device(s). Future authenticated connections use independent pinned credentials."
         : saveSync?.Settings.PendingInvitationExpiresAtUtc is { } expires
             ? $"A single-use invitation is pending until {expires.LocalDateTime:g}."
             : "This device is not paired.";
@@ -183,7 +214,8 @@ public sealed class LibraryWorkspaceViewModel(
 
     public string SaveSyncListenerStatus => saveSync?.ListenerStatus ?? "Save-sync transport is unavailable.";
 
-    public bool CanAcceptPairingInvitation => IsSaveSyncNotPaired &&
+    public bool CanAcceptPairingInvitation => saveSync is not null &&
+        saveSync.Settings.EffectiveTrustedPeers.Count(peer => peer.State != TrustedPeerState.Revoked) < SaveSyncSettings.MaximumTrustedPeers &&
         !string.IsNullOrWhiteSpace(TailscalePeerAddress) &&
         PairingCode.Count(static character => char.IsAsciiDigit(character)) == 6;
 
@@ -446,6 +478,8 @@ public sealed class LibraryWorkspaceViewModel(
                 IdentityCandidates.Clear();
                 IdentitySearchFailures.Clear();
                 ArtworkVariants.Clear();
+                SaveSnapshotHistory.Clear();
+                SelectedSaveSnapshot = null;
                 OnPropertyChanged(nameof(HasIdentityCandidates));
                 OnPropertyChanged(nameof(HasArtworkVariants));
                 OnPropertyChanged(nameof(AchievementSummary));
@@ -464,6 +498,7 @@ public sealed class LibraryWorkspaceViewModel(
                 OnPropertyChanged(nameof(HasLinkedIdentity));
                 OnPropertyChanged(nameof(CanBrowseProviderArtwork));
                 OnPropertyChanged(nameof(LinkedIdentitySummary));
+                OnPropertyChanged(nameof(CanRestoreSelectedSnapshot));
             }
         }
     }
@@ -1171,8 +1206,40 @@ public sealed class LibraryWorkspaceViewModel(
         Status = SaveSyncPairingFeedback;
     }
 
+    public async Task RenameSelectedTrustedPeerAsync(CancellationToken cancellationToken)
+    {
+        if (saveSync is null || SelectedTrustedPeer is null) return;
+        var error = await saveSync.RenamePeerAsync(SelectedTrustedPeer.DeviceId, TrustedPeerName, cancellationToken);
+        SaveSyncPairingFeedback = error ?? "Trusted device renamed.";
+        RefreshSaveSyncPairingState();
+    }
+
+    public async Task ToggleSelectedTrustedPeerAsync(CancellationToken cancellationToken)
+    {
+        if (saveSync is null || SelectedTrustedPeer is null) return;
+        var pause = SelectedTrustedPeer.State == TrustedPeerState.Active;
+        var error = await saveSync.SetPeerPausedAsync(SelectedTrustedPeer.DeviceId, pause, cancellationToken);
+        SaveSyncPairingFeedback = error ?? (pause ? "Trusted device paused." : "Trusted device resumed.");
+        RefreshSaveSyncPairingState();
+    }
+
+    public async Task RevokeSelectedTrustedPeerAsync(CancellationToken cancellationToken)
+    {
+        if (saveSync is null || SelectedTrustedPeer is null) return;
+        var error = await saveSync.RevokePeerAsync(SelectedTrustedPeer.DeviceId, cancellationToken);
+        SaveSyncPairingFeedback = error ?? "Trusted device independently revoked.";
+        SelectedTrustedPeer = null;
+        RefreshSaveSyncPairingState();
+    }
+
     public void RefreshSaveSyncPairingState()
     {
+        var selectedId = SelectedTrustedPeer?.DeviceId;
+        TrustedSaveSyncPeers.Clear();
+        if (saveSync is not null)
+            foreach (var peer in saveSync.Settings.EffectiveTrustedPeers.OrderBy(static peer => peer.DisplayName, StringComparer.OrdinalIgnoreCase))
+                TrustedSaveSyncPeers.Add(peer);
+        SelectedTrustedPeer = selectedId is { } id ? TrustedSaveSyncPeers.FirstOrDefault(peer => peer.DeviceId == id) : null;
         OnPropertyChanged(nameof(SaveSyncPairingStatus));
         OnPropertyChanged(nameof(IsSaveSyncPaired));
         OnPropertyChanged(nameof(IsSaveSyncNotPaired));
@@ -1292,6 +1359,30 @@ public sealed class LibraryWorkspaceViewModel(
             RefreshSaveSyncActivities();
         }
         finally { IsSaveTransferActive = false; }
+    }
+
+    public async Task RefreshSelectedSnapshotHistoryAsync(CancellationToken cancellationToken)
+    {
+        SaveSnapshotHistory.Clear();
+        SaveRestoreHistory.Clear();
+        SelectedSaveSnapshot = null;
+        if (saveSync is null || SelectedGame is null) { Status = "Select a game to inspect its save history."; return; }
+        var gameId = SelectedGame.SaveSyncId is { } shared ? new GameId(shared) : SelectedGame.Id;
+        var history = await saveSync.GetSnapshotHistoryAsync(gameId, cancellationToken);
+        foreach (var item in history) SaveSnapshotHistory.Add(item);
+        var restores = await saveSync.GetRestoreHistoryAsync(gameId, cancellationToken);
+        foreach (var item in restores) SaveRestoreHistory.Add(item);
+        Status = history.Count == 0 ? "No retained snapshots exist for this game." : $"Loaded {history.Count} integrity-checked save snapshots.";
+    }
+
+    public async Task RestoreSelectedSnapshotAsync(CancellationToken cancellationToken)
+    {
+        if (saveSync is null || SelectedGame is null || SelectedSaveSnapshot is null) return;
+        if (!SelectedSaveSnapshot.IntegrityValid) { Status = "The selected snapshot failed integrity verification and cannot be restored."; return; }
+        var result = await saveSync.RestoreSnapshotAsync(SelectedGame, SelectedSaveSnapshot.SnapshotId, cancellationToken);
+        Status = result.Message;
+        RefreshSaveSyncActivities();
+        await RefreshSelectedSnapshotHistoryAsync(cancellationToken);
     }
 
     public async Task ResolveSaveConflictAsync(SaveConflictChoice choice, CancellationToken cancellationToken)

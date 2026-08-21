@@ -161,16 +161,20 @@ internal static class Program
         services.AddSingleton<ISteamRegistryReader, WindowsSteamRegistryReader>();
         services.AddSingleton<ISteamFileSystem, PhysicalSteamFileSystem>();
         services.AddSingleton<IGameLauncher, SafeGameLauncher>();
-        services.AddSingleton<IPairingSecretStore, WindowsCredentialPairingSecretStore>();
+        services.AddSingleton<WindowsCredentialPairingSecretStore>();
+        services.AddSingleton<IPairingSecretStore>(provider => provider.GetRequiredService<WindowsCredentialPairingSecretStore>());
+        services.AddSingleton<IPeerCredentialStore>(provider => provider.GetRequiredService<WindowsCredentialPairingSecretStore>());
         services.AddSingleton<ISaveSyncTransport>(provider => new TailscaleTcpTransport(
             () => provider.GetRequiredService<ISaveSyncService>().Settings,
-            provider.GetRequiredService<IPairingSecretStore>()));
+            provider.GetRequiredService<IPairingSecretStore>(),
+            peerCredentials: provider.GetRequiredService<IPeerCredentialStore>()));
         services.AddSingleton<ISaveSyncService>(provider => new SaveSyncCoordinator(
             provider.GetRequiredService<IDocumentStore<SaveSyncDocument>>(),
             provider.GetRequiredService<ISaveSyncTransport>(),
             provider.GetRequiredService<IPairingSecretStore>(),
             provider.GetRequiredService<TimeProvider>(),
-            dataRoot));
+            dataRoot,
+            peerCredentials: provider.GetRequiredService<IPeerCredentialStore>()));
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IAtomicFileSystem, PhysicalAtomicFileSystem>();
         services.AddSingleton<IDocumentStore<GamesDocument>>(provider =>

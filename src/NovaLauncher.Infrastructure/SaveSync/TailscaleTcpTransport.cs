@@ -15,7 +15,8 @@ public sealed class TailscaleTcpTransport(
     Func<SaveSyncSettings> settings,
     IPairingSecretStore secrets,
     IPAddress? localAddressOverride = null,
-    int? localPortOverride = null) : ISaveSyncTransport, IDisposable
+    int? localPortOverride = null,
+    IPeerCredentialStore? peerCredentials = null) : ISaveSyncTransport, IDisposable
 {
     private const int MaximumFrameBytes = 520 * 1024 * 1024;
     private const int BootstrapMarker = -2;
@@ -31,7 +32,9 @@ public sealed class TailscaleTcpTransport(
 
     public string? LastServerError { get; private set; }
 
-    public bool IsConfigured => secrets.HasSecret && !string.IsNullOrWhiteSpace(settings().PeerAddress);
+    public bool IsConfigured => settings().EffectiveTrustedPeers.Any(peer =>
+        peer.State == TrustedPeerState.Active && (peerCredentials?.ContainsSecret(peer.DeviceId) == true ||
+        (settings().PeerDeviceId == peer.DeviceId && secrets.HasSecret)));
     public bool IsListening => _listener is not null;
     public string ListenerStatus { get; private set; } = "Listener has not been started.";
 
@@ -73,6 +76,12 @@ public sealed class TailscaleTcpTransport(
     public Task<TransportResult> PushAsync(SaveSnapshotPayload snapshot, CancellationToken cancellationToken) =>
         SendAsync(new WireRequest(Guid.NewGuid(), "Push", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), snapshot.Manifest.GameId, null, snapshot), cancellationToken);
 
+    public Task<TransportResult> PullAsync(TrustedSaveSyncPeer peer, GameId gameId, Guid? knownHead, CancellationToken cancellationToken) =>
+        SendAsync(peer, new WireRequest(Guid.NewGuid(), "Pull", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), gameId, knownHead, null), cancellationToken);
+
+    public Task<TransportResult> PushAsync(TrustedSaveSyncPeer peer, SaveSnapshotPayload snapshot, CancellationToken cancellationToken) =>
+        SendAsync(peer, new WireRequest(Guid.NewGuid(), "Push", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), snapshot.Manifest.GameId, null, snapshot), cancellationToken);
+
     public async Task<PairingRedemptionResult> RedeemInvitationAsync(string code, Guid requestingDeviceId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(settings().PeerAddress)) return new(false, null, null, "Enter and save the inviter's Tailscale IP first.");
@@ -93,17 +102,26 @@ public sealed class TailscaleTcpTransport(
 
     private async Task<TransportResult> SendAsync(WireRequest request, CancellationToken cancellationToken)
     {
-        if (!IsConfigured) return new(false, false, null, "The Tailscale peer is not configured or paired.");
+        var peer = settings().EffectiveTrustedPeers.FirstOrDefault(candidate => candidate.DeviceId == settings().PeerDeviceId)
+            ?? settings().EffectiveTrustedPeers.FirstOrDefault(candidate => candidate.State == TrustedPeerState.Active);
+        if (peer is null) return new(false, false, null, "The Tailscale peer is not configured or paired.");
+        return await SendAsync(peer, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<TransportResult> SendAsync(TrustedSaveSyncPeer peer, WireRequest request, CancellationToken cancellationToken)
+    {
+        if (peer.State != TrustedPeerState.Active) return new(false, false, null, "The selected peer is not active.");
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(15));
-            var peer = IPAddress.Parse(settings().PeerAddress!);
-            using var client = new TcpClient(peer.AddressFamily);
-            await client.ConnectAsync(peer, settings().Port, timeout.Token).ConfigureAwait(false);
+            var peerAddress = IPAddress.Parse(peer.Address);
+            using var client = new TcpClient(peerAddress.AddressFamily);
+            await client.ConnectAsync(peerAddress, settings().Port, timeout.Token).ConfigureAwait(false);
             await using var stream = client.GetStream();
-            await WriteEncryptedAsync(stream, request, timeout.Token).ConfigureAwait(false);
-            var response = await ReadEncryptedAsync<WireResponse>(stream, timeout.Token).ConfigureAwait(false);
+            var key = GetPeerSecret(peer.DeviceId);
+            await WriteEncryptedAsync(stream, request, settings().DeviceId, key, timeout.Token).ConfigureAwait(false);
+            var response = await ReadEncryptedAsync<WireResponse>(stream, peer.DeviceId, key, timeout.Token).ConfigureAwait(false);
             if (_endpoint is null || !await _endpoint.AuthorizePeerAsync(response.DeviceId, timeout.Token).ConfigureAwait(false))
                 return new(false, false, null, "The responding device identity is not paired.");
             return response.Result;
@@ -149,7 +167,7 @@ public sealed class TailscaleTcpTransport(
                         await WriteBootstrapAsync(stream, redemption, cancellationToken).ConfigureAwait(false);
                         return;
                     }
-                    var request = await ReadEncryptedAsync<WireRequest>(stream, header, cancellationToken).ConfigureAwait(false);
+                    var (request, _, requestKey) = await ReadIncomingRequestAsync(stream, header, cancellationToken).ConfigureAwait(false);
                     TransportResult result;
                     var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                     if (_seenRequests.Count > 4096)
@@ -164,7 +182,8 @@ public sealed class TailscaleTcpTransport(
                     else if (request.Operation == "Push" && request.Snapshot is not null)
                         result = await _endpoint.ReceivePushAsync(request.Snapshot, cancellationToken).ConfigureAwait(false);
                     else result = new(false, false, null, "Unknown peer operation.");
-                    await WriteEncryptedAsync(stream, new WireResponse(settings().DeviceId, result), cancellationToken).ConfigureAwait(false);
+                    await WriteEncryptedAsync(stream, new WireResponse(settings().DeviceId, result), settings().DeviceId, requestKey, cancellationToken).ConfigureAwait(false);
+                    CryptographicOperations.ZeroMemory(requestKey);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
@@ -175,43 +194,85 @@ public sealed class TailscaleTcpTransport(
         finally { _connections.Release(); }
     }
 
-    private async Task WriteEncryptedAsync<T>(Stream stream, T value, CancellationToken cancellationToken)
+    private static async Task WriteEncryptedAsync<T>(Stream stream, T value, Guid senderDeviceId, byte[] key, CancellationToken cancellationToken)
     {
-        var key = secrets.GetSecret() ?? throw new CryptographicException("The pairing secret is unavailable.");
         var plain = JsonSerializer.SerializeToUtf8Bytes(value);
         if (plain.Length > MaximumFrameBytes) throw new InvalidDataException("The peer frame exceeds its size limit.");
         var nonce = RandomNumberGenerator.GetBytes(12);
         var cipher = new byte[plain.Length];
         var tag = new byte[16];
         using (var aes = new AesGcm(key, 16)) aes.Encrypt(nonce, plain, cipher, tag);
-        var length = nonce.Length + tag.Length + cipher.Length;
+        var length = 16 + nonce.Length + tag.Length + cipher.Length;
         var header = new byte[4];
         BinaryPrimitives.WriteInt32BigEndian(header, length);
         await stream.WriteAsync(header, cancellationToken).ConfigureAwait(false);
+        await stream.WriteAsync(senderDeviceId.ToByteArray(), cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(nonce, cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(tag, cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(cipher, cancellationToken).ConfigureAwait(false);
-        CryptographicOperations.ZeroMemory(key);
     }
 
     private async Task<T> ReadEncryptedAsync<T>(Stream stream, CancellationToken cancellationToken)
     {
         var header = new byte[4];
         await stream.ReadExactlyAsync(header, cancellationToken).ConfigureAwait(false);
-        return await ReadEncryptedAsync<T>(stream, header, cancellationToken).ConfigureAwait(false);
+        var peer = settings().EffectiveTrustedPeers.FirstOrDefault(candidate => candidate.DeviceId == settings().PeerDeviceId)
+            ?? throw new CryptographicException("The paired device identity is unavailable.");
+        var key = GetPeerSecret(peer.DeviceId);
+        try { return await ReadEncryptedAsync<T>(stream, peer.DeviceId, key, cancellationToken).ConfigureAwait(false); }
+        finally { CryptographicOperations.ZeroMemory(key); }
     }
 
-    private async Task<T> ReadEncryptedAsync<T>(Stream stream, byte[] header, CancellationToken cancellationToken)
+    private static async Task<T> ReadEncryptedAsync<T>(Stream stream, Guid expectedSender, byte[] key, CancellationToken cancellationToken)
+    {
+        var header = new byte[4];
+        await stream.ReadExactlyAsync(header, cancellationToken).ConfigureAwait(false);
+        return await ReadEncryptedAsync<T>(stream, header, expectedSender, key, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<T> ReadEncryptedAsync<T>(Stream stream, byte[] header, Guid expectedSender, byte[] key, CancellationToken cancellationToken)
     {
         var length = BinaryPrimitives.ReadInt32BigEndian(header);
-        if (length is < 29 or > MaximumFrameBytes) throw new InvalidDataException("The peer frame length is invalid.");
+        if (length is < 45 or > MaximumFrameBytes) throw new InvalidDataException("The peer frame length is invalid.");
         var payload = new byte[length];
         await stream.ReadExactlyAsync(payload, cancellationToken).ConfigureAwait(false);
-        var key = secrets.GetSecret() ?? throw new CryptographicException("The pairing secret is unavailable.");
-        var plain = new byte[length - 28];
-        using (var aes = new AesGcm(key, 16)) aes.Decrypt(payload.AsSpan(0, 12), payload.AsSpan(28), payload.AsSpan(12, 16), plain);
-        CryptographicOperations.ZeroMemory(key);
+        var sender = new Guid(payload.AsSpan(0, 16));
+        if (sender != expectedSender) throw new CryptographicException("The encrypted frame identity does not match the selected peer.");
+        var plain = new byte[length - 44];
+        using (var aes = new AesGcm(key, 16)) aes.Decrypt(payload.AsSpan(16, 12), payload.AsSpan(44), payload.AsSpan(28, 16), plain);
         return JsonSerializer.Deserialize<T>(plain) ?? throw new JsonException("The peer message is empty.");
+    }
+
+    private async Task<(WireRequest Request, Guid DeviceId, byte[] Key)> ReadIncomingRequestAsync(Stream stream, byte[] header, CancellationToken cancellationToken)
+    {
+        var length = BinaryPrimitives.ReadInt32BigEndian(header);
+        if (length is < 45 or > MaximumFrameBytes) throw new InvalidDataException("The peer frame length is invalid.");
+        var payload = new byte[length];
+        await stream.ReadExactlyAsync(payload, cancellationToken).ConfigureAwait(false);
+        var deviceId = new Guid(payload.AsSpan(0, 16));
+        var key = GetPeerSecret(deviceId);
+        try
+        {
+            var plain = new byte[length - 44];
+            using (var aes = new AesGcm(key, 16)) aes.Decrypt(payload.AsSpan(16, 12), payload.AsSpan(44), payload.AsSpan(28, 16), plain);
+            var request = JsonSerializer.Deserialize<WireRequest>(plain) ?? throw new JsonException("The peer request is empty.");
+            if (request.DeviceId != deviceId) throw new CryptographicException("The authenticated request identity is inconsistent.");
+            return (request, deviceId, key);
+        }
+        catch { CryptographicOperations.ZeroMemory(key); throw; }
+    }
+
+    private byte[] GetPeerSecret(Guid peerDeviceId)
+    {
+        var key = peerCredentials?.GetSecret(peerDeviceId);
+        if (key is { Length: 32 }) return key;
+        if (settings().PeerDeviceId == peerDeviceId)
+        {
+            key = secrets.GetSecret();
+            if (key is { Length: 32 }) return key;
+        }
+        if (key is not null) CryptographicOperations.ZeroMemory(key);
+        throw new CryptographicException("The selected peer credential is unavailable.");
     }
 
     private static async Task WriteBootstrapAsync<T>(Stream stream, T value, CancellationToken cancellationToken)

@@ -234,6 +234,30 @@ public sealed class DocumentPolicyTests
         Assert.NotNull(policy.Validate(valid with { Settings = valid.Settings with { Games = [unsafeState] } }));
     }
 
+    [Fact]
+    public void SaveSyncPolicyBoundsAndSeparatesTrustedPeers()
+    {
+        var policy = new SaveSyncDocumentPolicy();
+        var valid = SaveSyncDocument.CreateDefault();
+        var peer = new TrustedSaveSyncPeer(
+            Guid.NewGuid(), "Desktop", "100.64.0.2", "credential/desktop",
+            TrustedPeerState.Active, Now, Now.AddMinutes(1));
+
+        Assert.Null(policy.Validate(valid with { Settings = valid.Settings with { TrustedPeers = [peer] } }));
+        Assert.Contains("duplicated", policy.Validate(valid with
+        {
+            Settings = valid.Settings with { TrustedPeers = [peer, peer with { DeviceId = Guid.NewGuid() }] },
+        }), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("invalid", policy.Validate(valid with
+        {
+            Settings = valid.Settings with { TrustedPeers = [peer with { Address = "192.168.1.2" }] },
+        }), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("invalid", policy.Validate(valid with
+        {
+            Settings = valid.Settings with { TrustedPeers = [peer with { DeviceId = valid.Settings.DeviceId }] },
+        }), StringComparison.OrdinalIgnoreCase);
+    }
+
     private static LibraryItem ValidGame() => new(
         GameId.New(),
         "Game",

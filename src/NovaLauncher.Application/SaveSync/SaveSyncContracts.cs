@@ -15,6 +15,24 @@ public enum SaveSyncStatus
 }
 
 public sealed record SaveSyncResult(SaveSyncStatus Status, string Message, Guid? SnapshotId = null);
+public sealed record SaveSnapshotHistoryItem(
+    Guid SnapshotId,
+    Guid? ParentSnapshotId,
+    Guid DeviceId,
+    DateTimeOffset CreatedAtUtc,
+    int FileCount,
+    long TotalBytes,
+    bool IsHead,
+    bool IntegrityValid,
+    string? Error);
+public sealed record SaveRestoreHistoryItem(
+    Guid OperationId,
+    GameId GameId,
+    Guid SourceSnapshotId,
+    DateTimeOffset CreatedAtUtc,
+    int BackedUpFileCount,
+    long BackedUpBytes,
+    string Outcome);
 
 public enum SaveConflictChoice { KeepLocal, KeepRemote, KeepBoth }
 
@@ -33,6 +51,8 @@ public interface ISaveSyncTransport : IAsyncDisposable
     Task StartAsync(ISaveSyncPeerEndpoint endpoint, CancellationToken cancellationToken);
     Task<TransportResult> PullAsync(GameId gameId, Guid? knownHead, CancellationToken cancellationToken);
     Task<TransportResult> PushAsync(SaveSnapshotPayload snapshot, CancellationToken cancellationToken);
+    Task<TransportResult> PullAsync(TrustedSaveSyncPeer peer, GameId gameId, Guid? knownHead, CancellationToken cancellationToken);
+    Task<TransportResult> PushAsync(TrustedSaveSyncPeer peer, SaveSnapshotPayload snapshot, CancellationToken cancellationToken);
     Task<PairingRedemptionResult> RedeemInvitationAsync(string code, Guid requestingDeviceId, CancellationToken cancellationToken);
 }
 
@@ -52,6 +72,15 @@ public interface IPairingSecretStore
     void Clear();
 }
 
+public interface IPeerCredentialStore
+{
+    bool ContainsSecret(Guid peerDeviceId);
+    byte[]? GetSecret(Guid peerDeviceId);
+    void SetSecret(Guid peerDeviceId, ReadOnlySpan<byte> secret);
+    void Clear(Guid peerDeviceId);
+    string GetCredentialReference(Guid peerDeviceId);
+}
+
 public interface ISaveSyncService
 {
     SaveSyncSettings Settings { get; }
@@ -62,6 +91,10 @@ public interface ISaveSyncService
     Task<string> GeneratePairingCodeAsync(CancellationToken cancellationToken);
     Task<string?> ApplyPairingCodeAsync(string code, CancellationToken cancellationToken);
     Task<string?> RevokePeerAsync(CancellationToken cancellationToken);
+    Task<string?> RenamePeerAsync(Guid peerDeviceId, string displayName, CancellationToken cancellationToken);
+    Task<string?> SetPeerPausedAsync(Guid peerDeviceId, bool paused, CancellationToken cancellationToken);
+    Task<string?> RevokePeerAsync(Guid peerDeviceId, CancellationToken cancellationToken);
+    Task<string?> RotatePeerCredentialAsync(Guid peerDeviceId, CancellationToken cancellationToken);
     Task<string?> ConfigurePeerAsync(string address, CancellationToken cancellationToken);
     Task<string?> RetryListenerAsync(CancellationToken cancellationToken);
     (Guid? Identity, string? Error) DeriveSharedSaveIdentity(string label, string platform);
@@ -69,4 +102,7 @@ public interface ISaveSyncService
     Task<SaveSyncResult> PullBeforeLaunchAsync(LibraryItem game, CancellationToken cancellationToken);
     Task<SaveSyncResult> SnapshotAndPushAfterExitAsync(LibraryItem game, CancellationToken cancellationToken);
     Task<SaveSyncResult> ResolveConflictAsync(LibraryItem game, SaveConflictChoice choice, CancellationToken cancellationToken);
+    Task<IReadOnlyList<SaveSnapshotHistoryItem>> GetSnapshotHistoryAsync(GameId gameId, CancellationToken cancellationToken);
+    Task<SaveSyncResult> RestoreSnapshotAsync(LibraryItem game, Guid snapshotId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<SaveRestoreHistoryItem>> GetRestoreHistoryAsync(GameId gameId, CancellationToken cancellationToken);
 }
