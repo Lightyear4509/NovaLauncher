@@ -87,12 +87,21 @@ public interface IArtworkMaterializer
 }
 
 public sealed record ManualCoverImportResult(ArtworkReference? Cover, string? CreatedPath, string? Error);
+public sealed record ArtworkCacheResult(int FileCount, long TotalBytes, int RemovedCount, long RemovedBytes, bool WasBounded, string? Error);
 
 public interface IManualCoverService
 {
     Task<ManualCoverImportResult> ImportAsync(GameId gameId, string sourcePath, CancellationToken cancellationToken);
 
+    Task<ManualCoverImportResult> ImportAsync(GameId gameId, ArtworkKind kind, string sourcePath, CancellationToken cancellationToken);
+
+    Task<ManualCoverImportResult> CropAsync(GameId gameId, ArtworkReference source, double x, double y, double width, double height, CancellationToken cancellationToken);
+
     Task DeleteManagedAsync(string location, CancellationToken cancellationToken);
+
+    Task<ArtworkCacheResult> InspectCacheAsync(CancellationToken cancellationToken);
+
+    Task<ArtworkCacheResult> CleanupCacheAsync(IReadOnlySet<string> retainedLocations, CancellationToken cancellationToken);
 }
 
 public sealed record ProviderRefreshResult(
@@ -103,10 +112,20 @@ public sealed record ProviderRefreshResult(
     IReadOnlyList<string> ProviderFailures,
     string? Error);
 
+public sealed record ArtworkVariantResult(
+    ProviderResultStatus Status,
+    IReadOnlyList<ArtworkCandidate> Candidates,
+    IReadOnlyList<string> ProviderFailures,
+    string? Error);
+
 public interface IGameEnrichmentService
 {
     Task<ProviderRefreshResult> RefreshAsync(
         GameId gameId,
         bool forceRefresh,
         CancellationToken cancellationToken);
+
+    Task<ArtworkVariantResult> PreviewArtworkVariantsAsync(GameId gameId, ArtworkKind kind, CancellationToken cancellationToken);
+
+    Task<ProviderRefreshResult> ApplyArtworkVariantAsync(GameId gameId, ArtworkCandidate candidate, CancellationToken cancellationToken);
 }

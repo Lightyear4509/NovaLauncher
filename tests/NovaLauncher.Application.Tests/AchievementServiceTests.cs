@@ -70,6 +70,28 @@ public sealed class AchievementServiceTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.GetAsync(game.Id, true, cancellation.Token));
     }
 
+    [Fact]
+    public async Task ConfirmedManualSteamIdentityEnablesRequestWithoutChangingLaunchSource()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var game = new LibraryItem(
+            GameId.New(), "Manual", "Windows", "Manual",
+            new LaunchTarget("C:\\Games\\manual.exe", [], null, LaunchTargetKind.Executable),
+            new GameMetadata(null, null, null, null, null, null), false, now, now,
+            LinkedIdentity: new LinkedGameIdentity("Steam", "570", "Dota 2", 2013, "570", now));
+        using var library = new LibraryCoordinator(new Store<GamesDocument>(new GamesDocument(1, [game])), new ManualGameDraftValidator(), TimeProvider.System);
+        await library.LoadAsync(CancellationToken.None);
+        var provider = new CapturingProvider(game.Id);
+        using var service = new AchievementService([provider], new Store<AchievementsDocument>(), library, TimeProvider.System, "fingerprint");
+
+        var result = await service.GetAsync(game.Id, true, CancellationToken.None);
+
+        Assert.Equal(AchievementRefreshStatus.Success, result.Status);
+        Assert.Equal("Steam", provider.Request!.Source);
+        Assert.Equal("570", provider.Request.SourceItemId);
+        Assert.Equal("Manual", Assert.Single(library.Games).Source);
+    }
+
     private static LibraryItem Game()
     {
         var now = DateTimeOffset.UtcNow;
@@ -92,6 +114,19 @@ public sealed class AchievementServiceTests
             return Task.FromResult(status == AchievementRefreshStatus.Success
                 ? new AchievementProviderResult(status, Snapshot(gameId, DateTimeOffset.UtcNow), null)
                 : new AchievementProviderResult(status, null, "offline"));
+        }
+    }
+
+    private sealed class CapturingProvider(GameId gameId) : IAchievementProvider
+    {
+        public string Id => "Steam";
+        public bool IsConfigured => true;
+        public AchievementRequest? Request { get; private set; }
+        public bool CanHandle(AchievementRequest request) => request.Source == "Steam" && request.SourceItemId == "570";
+        public Task<AchievementProviderResult> GetAsync(AchievementRequest request, CancellationToken cancellationToken)
+        {
+            Request = request;
+            return Task.FromResult(new AchievementProviderResult(AchievementRefreshStatus.Success, Snapshot(gameId, DateTimeOffset.UtcNow), null));
         }
     }
 

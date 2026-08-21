@@ -1,3 +1,4 @@
+using System.Globalization;
 using NovaLauncher.Application.Enrichment;
 using NovaLauncher.Application.Library;
 using NovaLauncher.Application.Persistence;
@@ -153,6 +154,29 @@ public sealed class EnrichmentTests
         Assert.Equal("Game", Assert.Single(library.Games).Name);
     }
 
+    [Fact]
+    public async Task ArtworkVariantPreviewIsBoundedAndApplyPersistsOnlyChosenCandidate()
+    {
+        var game = SteamGame(40);
+        var store = new LoadedStore(game);
+        using var library = new LibraryCoordinator(store, new ManualGameDraftValidator(), TimeProvider.System);
+        await library.LoadAsync(CancellationToken.None);
+        var service = new GameEnrichmentService(
+            [], [new ManyArtworkProvider()],
+            new ProviderCache<MetadataSnapshot[]>(TimeProvider.System, TimeSpan.FromDays(1), TimeSpan.FromDays(2), 10),
+            new ProviderCache<ArtworkCandidate[]>(TimeProvider.System, TimeSpan.FromDays(1), TimeSpan.FromDays(2), 10),
+            new PassthroughMaterializer(), library);
+
+        var preview = await service.PreviewArtworkVariantsAsync(game.Id, ArtworkKind.Cover, CancellationToken.None);
+        Assert.Equal(20, preview.Candidates.Count);
+        Assert.Equal(0, store.SaveCalls);
+        var chosen = preview.Candidates[5];
+        var applied = await service.ApplyArtworkVariantAsync(game.Id, chosen, CancellationToken.None);
+        Assert.Equal(ProviderResultStatus.Success, applied.Status);
+        Assert.Equal(chosen.Location, applied.Item!.Artwork!.Cover.Location);
+        Assert.Equal(1, store.SaveCalls);
+    }
+
     private static MetadataSnapshot Snapshot(
         string provider,
         string? description,
@@ -208,6 +232,16 @@ public sealed class EnrichmentTests
         public Task<ArtworkProviderResult> GetArtworkAsync(MetadataRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(new ArtworkProviderResult(Id, ProviderResultStatus.Success,
                 [new ArtworkCandidate(ArtworkKind.Cover, "https://example.test/cover.jpg", Id, null, DateTimeOffset.UtcNow)], null));
+    }
+
+    private sealed class ManyArtworkProvider : IArtworkProvider
+    {
+        public string Id => "Variants";
+        public int Priority => 1;
+        public bool CanHandle(MetadataRequest request) => true;
+        public Task<ArtworkProviderResult> GetArtworkAsync(MetadataRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(new ArtworkProviderResult(Id, ProviderResultStatus.Success,
+                Enumerable.Range(0, 25).Select(index => new ArtworkCandidate(ArtworkKind.Cover, $"https://example.test/{index}.png", Id, index.ToString(CultureInfo.InvariantCulture), DateTimeOffset.UtcNow)).ToArray(), null));
     }
 
     private sealed class PassthroughMaterializer : IArtworkMaterializer

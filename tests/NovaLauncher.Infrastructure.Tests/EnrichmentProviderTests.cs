@@ -165,6 +165,32 @@ public sealed class EnrichmentProviderTests
     }
 
     [Fact]
+    public async Task SteamGridDbIdentitySearchIsBoundedFilteredAndRequiresSessionKey()
+    {
+        var json = """
+            {"success":true,"data":[
+              {"id":10,"name":"Safe Game","release_date":946684800},
+              {"id":11,"name":"Adult Game","adult":true},
+              {"id":12,"name":"Flash Game","epilepsy":true},
+              {"id":13,"name":"Joke Game","humor":true},
+              {"id":14,"name":"Missing date"}
+            ]}
+            """u8.ToArray();
+        var disabled = new SteamGridDbIdentitySearchProvider(new FakeBoundedHttp(json), new ApiKeySession(null));
+        Assert.Empty((await disabled.SearchAsync("safegame", "Safe Game", CancellationToken.None)).Candidates);
+
+        var provider = new SteamGridDbIdentitySearchProvider(
+            new FakeBoundedHttp(new BoundedHttpResult(HttpStatusCode.OK, json, false, null, "application/json")),
+            new ApiKeySession("secret"));
+        var result = await provider.SearchAsync("safegame", "Safe Game", CancellationToken.None);
+
+        Assert.Equal(2, result.Candidates.Count);
+        Assert.Equal(2000, result.Candidates[0].ReleaseYear);
+        Assert.DoesNotContain(result.Candidates, candidate => candidate.DisplayName.Contains("Adult", StringComparison.Ordinal));
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
     public async Task BoundedClientHandlesPermanentFailureNetworkFailureAndCancellation()
     {
         var permanent = new BoundedHttpClient(

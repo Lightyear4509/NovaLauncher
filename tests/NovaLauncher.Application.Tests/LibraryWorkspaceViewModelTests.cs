@@ -515,6 +515,12 @@ public sealed class LibraryWorkspaceViewModelTests
         public Task<ProviderRefreshResult> RefreshAsync(GameId gameId, bool forceRefresh, CancellationToken cancellationToken) =>
             Task.FromResult(Refresh(gameId));
 
+        public Task<ArtworkVariantResult> PreviewArtworkVariantsAsync(GameId gameId, ArtworkKind kind, CancellationToken cancellationToken) =>
+            Task.FromResult(new ArtworkVariantResult(ProviderResultStatus.NoData, [], [], "No fake variants."));
+
+        public Task<ProviderRefreshResult> ApplyArtworkVariantAsync(GameId gameId, ArtworkCandidate candidate, CancellationToken cancellationToken) =>
+            Task.FromResult(new ProviderRefreshResult(ProviderResultStatus.NoData, null, false, false, [], "No fake variant."));
+
         private ProviderRefreshResult Refresh(GameId gameId)
         {
             RefreshCalls++;

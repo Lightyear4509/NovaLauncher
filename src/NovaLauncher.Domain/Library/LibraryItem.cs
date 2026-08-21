@@ -18,4 +18,5 @@ public sealed record LibraryItem(
     bool RunAsAdministrator = false,
     string? SaveDirectory = null,
     Guid? SaveSyncId = null,
-    string? SaveSyncLabel = null);
+    string? SaveSyncLabel = null,
+    LinkedGameIdentity? LinkedIdentity = null);

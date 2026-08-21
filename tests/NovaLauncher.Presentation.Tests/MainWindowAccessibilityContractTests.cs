@@ -34,8 +34,12 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("AutomationProperties.Name=\"Refresh selected game metadata and artwork\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Selected game artwork\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Game cover artwork\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Add cover\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Remove cover\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Choose custom artwork for manual game\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Remove selected custom artwork from manual game\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Manual game identity matching\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Confirm this game identity candidate\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Save protected manual game metadata\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Review provider artwork variants\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Stretch=\"UniformToFill\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Artwork.Cover.Location", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Refresh metadata\"", xaml, StringComparison.Ordinal);

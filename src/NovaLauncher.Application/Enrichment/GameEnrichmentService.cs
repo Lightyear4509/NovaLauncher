@@ -36,8 +36,8 @@ public sealed class GameEnrichmentService : IGameEnrichmentService
             return new ProviderRefreshResult(ProviderResultStatus.Failed, null, false, false, [], "The selected game no longer exists.");
         }
 
-        var request = new MetadataRequest(game.Id, game.Source, game.SourceItemId);
-        var cacheKey = $"{game.Source.ToUpperInvariant()}:{game.SourceItemId ?? game.Id.ToString()}";
+        var request = CreateRequest(game);
+        var cacheKey = $"{request.Source.ToUpperInvariant()}:{request.SourceItemId ?? game.Id.ToString()}";
         var metadataLookup = forceRefresh
             ? new CacheLookup<MetadataSnapshot[]>(CacheLookupStatus.Miss, null)
             : _metadataCache.Get(cacheKey);
@@ -113,6 +113,45 @@ public sealed class GameEnrichmentService : IGameEnrichmentService
         return await PublishAsync(game, snapshots, artwork, false, usedStale, failures, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<ArtworkVariantResult> PreviewArtworkVariantsAsync(GameId gameId, ArtworkKind kind, CancellationToken cancellationToken)
+    {
+        var game = _library.Games.FirstOrDefault(item => item.Id == gameId);
+        if (game is null) return new(ProviderResultStatus.Failed, [], [], "The selected game no longer exists.");
+        if (game.LinkedIdentity is null && string.Equals(game.Source, "Manual", StringComparison.OrdinalIgnoreCase))
+            return new(ProviderResultStatus.NoData, [], [], "Confirm a provider identity before requesting provider artwork.");
+        var request = CreateRequest(game);
+        var candidates = new List<ArtworkCandidate>();
+        var failures = new List<string>();
+        foreach (var provider in _artworkProviders.Where(provider => provider.CanHandle(request)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await provider.GetArtworkAsync(request, cancellationToken).ConfigureAwait(false);
+            candidates.AddRange(result.Candidates.Where(candidate => candidate.Kind == kind));
+            if (result.Error is not null) failures.Add($"{provider.Id}: {result.Error}");
+        }
+        var bounded = candidates.GroupBy(static candidate => candidate.Location, StringComparer.Ordinal).Select(static group => group.First()).Take(20).ToArray();
+        return new(bounded.Length == 0 ? ProviderResultStatus.NoData : ProviderResultStatus.Success, bounded, failures.Take(10).ToArray(),
+            bounded.Length == 0 ? "No provider variants are available for this artwork type." : null);
+    }
+
+    public async Task<ProviderRefreshResult> ApplyArtworkVariantAsync(GameId gameId, ArtworkCandidate candidate, CancellationToken cancellationToken)
+    {
+        var game = _library.Games.FirstOrDefault(item => item.Id == gameId);
+        if (game is null) return new(ProviderResultStatus.Failed, null, false, false, [], "The selected game no longer exists.");
+        var materialized = await _artworkMaterializer.MaterializeAsync(gameId, [candidate], cancellationToken).ConfigureAwait(false);
+        if (materialized.Candidates.Count == 0)
+            return new(ProviderResultStatus.InvalidResponse, null, false, false, materialized.Failures, "The selected artwork failed bounded validation.");
+        var merged = MergeArtwork(game.Artwork, materialized.Candidates);
+        var save = await _library.ApplyEnrichmentAsync(gameId, game.Metadata, merged, cancellationToken).ConfigureAwait(false);
+        if (save.Status != LibraryMutationStatus.Saved)
+        {
+            await _artworkMaterializer.RollbackAsync(materialized.CreatedFiles, CancellationToken.None).ConfigureAwait(false);
+            return new(ProviderResultStatus.Failed, null, false, false, materialized.Failures, save.Error ?? "Artwork could not be saved.");
+        }
+        await _artworkMaterializer.CleanupObsoleteAsync(game.Artwork, merged, CancellationToken.None).ConfigureAwait(false);
+        return new(ProviderResultStatus.Success, save.Item, false, false, materialized.Failures, null);
+    }
+
     private async Task<ProviderRefreshResult> PublishAsync(
         LibraryItem game,
         IReadOnlyList<MetadataSnapshot> snapshots,
@@ -142,6 +181,10 @@ public sealed class GameEnrichmentService : IGameEnrichmentService
         Select(ArtworkKind.Hero, current?.Hero, candidates),
         Select(ArtworkKind.Logo, current?.Logo, candidates),
         Select(ArtworkKind.Background, current?.Background, candidates));
+
+    private static MetadataRequest CreateRequest(LibraryItem game) => game.LinkedIdentity is { } linked
+        ? new MetadataRequest(game.Id, linked.SteamAppId is not null ? "Steam" : linked.ProviderId, linked.SteamAppId ?? linked.ProviderItemId)
+        : new MetadataRequest(game.Id, game.Source, game.SourceItemId);
 
     private static ArtworkReference Select(ArtworkKind kind, ArtworkReference? current, IReadOnlyList<ArtworkCandidate> candidates)
     {

@@ -9,6 +9,7 @@
     xmlns:steam="using:NovaLauncher.Application.Steam"
     xmlns:achievements="using:NovaLauncher.Domain.Achievements"
     xmlns:themes="using:NovaLauncher.Application.Themes"
+    xmlns:enrichment="using:NovaLauncher.Application.Enrichment"
     xmlns:vm="using:NovaLauncher.Application"
     x:DataType="vm:MainWindowViewModel"
     Title="NovaLauncher"
@@ -237,11 +238,91 @@
                 <Button Classes="primary" Content="Play" Click="OnLaunch" AutomationProperties.Name="Launch selected game" />
                 <Button Content="Locate game" Click="OnLocateSelectedGame" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Locate replacement executable for selected manual game" />
                 <Button Content="Refresh metadata" Click="OnRefreshMetadata" AutomationProperties.Name="Refresh selected game metadata and artwork" />
-                <Button Content="Add cover" Click="OnAddManualCover" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Choose custom cover for manual game" />
-                <Button Content="Remove cover" Click="OnRemoveManualCover" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Remove custom cover from manual game" />
+                <ComboBox ItemsSource="{Binding Workspace.ArtworkKindOptions}" SelectedItem="{Binding Workspace.SelectedArtworkKind}" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Custom artwork type" />
+                <Button Content="Add artwork" Click="OnAddManualCover" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Choose custom artwork for manual game" />
+                <Button Content="Remove artwork" Click="OnRemoveManualCover" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Remove selected custom artwork from manual game" />
+                <Button Content="Provider variants" Click="OnPreviewArtworkVariants" IsEnabled="{Binding Workspace.CanBrowseProviderArtwork}" AutomationProperties.Name="Review provider artwork variants" />
+                <Button Content="Inspect art cache" Click="OnInspectArtworkCache" AutomationProperties.Name="Inspect managed artwork cache" />
+                <Button Content="Clean orphan art" Click="OnCleanupArtworkCache" AutomationProperties.Name="Remove unreferenced managed artwork cache files" />
                 <Button Content="Favorite" Click="OnToggleFavorite" AutomationProperties.Name="Toggle selected game favorite" />
                 <Button Content="Edit" Click="OnEditSelectedGame" AutomationProperties.Name="Edit selected game" />
               </WrapPanel>
+              <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="12" Padding="16" IsVisible="{Binding Workspace.HasArtworkVariants}" AutomationProperties.Name="Provider artwork variant review">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="Provider artwork variants" FontSize="18" FontWeight="SemiBold" />
+                  <TextBlock Text="Choosing a variant downloads it through the bounded validator before it can enter the managed cache." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+                  <ItemsControl ItemsSource="{Binding Workspace.ArtworkVariants}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="enrichment:ArtworkCandidate">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,3" ColumnSpacing="10">
+                          <StackPanel><TextBlock Text="{Binding ProviderId}" FontWeight="SemiBold" /><TextBlock Text="{Binding Kind}" Foreground="{DynamicResource ThemeMuted}" /></StackPanel>
+                          <Button Grid.Column="1" Content="Use this variant" Click="OnApplyArtworkVariant" AutomationProperties.Name="Apply this provider artwork variant" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+              <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="12" Padding="16" IsVisible="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Artwork crop and reposition controls">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="Crop and reposition" FontSize="18" FontWeight="SemiBold" />
+                  <TextBlock Text="Percentages are measured from the top-left of the currently displayed artwork. The crop is validated and previewed immediately in the details hero after applying." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+                  <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="8">
+                    <StackPanel><TextBlock Text="Left %" /><NumericUpDown Value="{Binding Workspace.ArtworkCropX}" Minimum="0" Maximum="99" Increment="1" AutomationProperties.Name="Artwork crop left percent" /></StackPanel>
+                    <StackPanel Grid.Column="1"><TextBlock Text="Top %" /><NumericUpDown Value="{Binding Workspace.ArtworkCropY}" Minimum="0" Maximum="99" Increment="1" AutomationProperties.Name="Artwork crop top percent" /></StackPanel>
+                    <StackPanel Grid.Column="2"><TextBlock Text="Width %" /><NumericUpDown Value="{Binding Workspace.ArtworkCropWidth}" Minimum="1" Maximum="100" Increment="1" AutomationProperties.Name="Artwork crop width percent" /></StackPanel>
+                    <StackPanel Grid.Column="3"><TextBlock Text="Height %" /><NumericUpDown Value="{Binding Workspace.ArtworkCropHeight}" Minimum="1" Maximum="100" Increment="1" AutomationProperties.Name="Artwork crop height percent" /></StackPanel>
+                  </Grid>
+                  <Button Content="Apply crop and preview" Click="OnCropSelectedArtwork" HorizontalAlignment="Left" AutomationProperties.Name="Apply artwork crop and update preview" />
+                </StackPanel>
+              </Border>
+              <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="12" Padding="16" IsVisible="{Binding Workspace.CanMatchManualGame}" AutomationProperties.Name="Manual game identity matching">
+                <StackPanel Spacing="9">
+                  <TextBlock Text="Game identity" FontSize="18" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Workspace.LinkedIdentitySummary}" TextWrapping="Wrap" />
+                  <TextBox Text="{Binding Workspace.IdentitySearchText}" MaxLength="200" PlaceholderText="Search title" AutomationProperties.Name="Manual game identity search title" />
+                  <WrapPanel ItemSpacing="8">
+                    <Button Content="Find matches" Click="OnSearchGameIdentity" AutomationProperties.Name="Search for manual game identity candidates" />
+                    <Button Content="No match" Click="OnRejectGameIdentityMatches" IsEnabled="{Binding Workspace.HasIdentityCandidates}" AutomationProperties.Name="Reject all game identity candidates" />
+                    <Button Content="Unlink identity" Click="OnUnlinkGameIdentity" IsEnabled="{Binding Workspace.HasLinkedIdentity}" AutomationProperties.Name="Unlink confirmed game identity" />
+                  </WrapPanel>
+                  <TextBlock Text="Candidates are review-only. Searching never changes the launch target or downloads artwork." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+                  <ItemsControl ItemsSource="{Binding Workspace.IdentityCandidates}" AutomationProperties.Name="Manual game identity candidates">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="enrichment:GameIdentityCandidate">
+                        <Border BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,3">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <StackPanel>
+                              <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                              <TextBlock Text="{Binding ProviderId}" Foreground="{DynamicResource ThemeAccent}" />
+                              <TextBlock Text="{Binding MatchReason}" Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="Confirm match" Click="OnConfirmGameIdentity" AutomationProperties.Name="Confirm this game identity candidate" />
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <ItemsControl ItemsSource="{Binding Workspace.IdentitySearchFailures}" AutomationProperties.Name="Game identity search warnings">
+                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{DynamicResource ThemeAccent}" TextWrapping="Wrap" /></DataTemplate></ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+              <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="12" Padding="16" IsVisible="{Binding Workspace.CanMatchManualGame}" AutomationProperties.Name="Manual metadata overrides">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="Your game details" FontSize="18" FontWeight="SemiBold" />
+                  <TextBlock Text="Values saved here are protected from provider refresh until you explicitly restore provider values." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+                  <TextBox Text="{Binding Workspace.ManualDescription}" MaxLength="10000" AcceptsReturn="True" MinHeight="80" TextWrapping="Wrap" PlaceholderText="Description" AutomationProperties.Name="Manual game description" />
+                  <TextBox Text="{Binding Workspace.ManualGenres}" PlaceholderText="Genres, separated by commas" AutomationProperties.Name="Manual game genres" />
+                  <TextBox Text="{Binding Workspace.ManualDevelopers}" PlaceholderText="Developers, separated by commas" AutomationProperties.Name="Manual game developers" />
+                  <TextBox Text="{Binding Workspace.ManualPublishers}" PlaceholderText="Publishers, separated by commas" AutomationProperties.Name="Manual game publishers" />
+                  <TextBox Text="{Binding Workspace.ManualReleaseDate}" PlaceholderText="Release date: YYYY-MM-DD" AutomationProperties.Name="Manual game release date" />
+                  <WrapPanel ItemSpacing="8">
+                    <Button Content="Save my details" Click="OnSaveManualMetadata" AutomationProperties.Name="Save protected manual game metadata" />
+                    <Button Content="Restore provider values" Click="OnRestoreProviderMetadata" IsEnabled="{Binding Workspace.HasLinkedIdentity}" AutomationProperties.Name="Remove manual metadata protection and refresh provider values" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
               <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="12" Padding="16">
                 <StackPanel Spacing="8">
                   <TextBlock Text="Cross-device saves" FontSize="18" FontWeight="SemiBold" />

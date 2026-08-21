@@ -28,7 +28,8 @@ public sealed class LibraryWorkspaceViewModel(
     IThemeService themes,
     IApiKeySession? apiKeys = null,
     IManualCoverService? manualCovers = null,
-    ISaveSyncService? saveSync = null) : INotifyPropertyChanged
+    ISaveSyncService? saveSync = null,
+    IGameIdentityService? identityService = null) : INotifyPropertyChanged
 {
     private LibraryItem? _selectedGame;
     private GameCollection? _selectedCollection;
@@ -73,6 +74,17 @@ public sealed class LibraryWorkspaceViewModel(
     private readonly Stack<string> _backHistory = new();
     private readonly Stack<string> _forwardHistory = new();
     private string _saveSyncPairingFeedback = "Enter and save the other device's Tailscale IP before pairing.";
+    private string _identitySearchText = string.Empty;
+    private string _manualDescription = string.Empty;
+    private string _manualGenres = string.Empty;
+    private string _manualDevelopers = string.Empty;
+    private string _manualPublishers = string.Empty;
+    private string _manualReleaseDate = string.Empty;
+    private string _selectedArtworkKind = "Cover";
+    private double _artworkCropX;
+    private double _artworkCropY;
+    private double _artworkCropWidth = 100;
+    private double _artworkCropHeight = 100;
     private readonly HashSet<GameId> _selectedLibraryGameIds = [];
     private string? _pendingDuplicateMergeKey;
     private int _libraryRenderLimit = LibraryRenderPageSize;
@@ -99,6 +111,9 @@ public sealed class LibraryWorkspaceViewModel(
     public ObservableCollection<LibraryItem> MostPlayedGames { get; } = [];
     public ObservableCollection<SaveSyncActivityItem> SaveSyncActivities { get; } = [];
     public ObservableCollection<DuplicateReviewItem> DuplicateCandidates { get; } = [];
+    public ObservableCollection<GameIdentityCandidate> IdentityCandidates { get; } = [];
+    public ObservableCollection<string> IdentitySearchFailures { get; } = [];
+    public ObservableCollection<ArtworkCandidate> ArtworkVariants { get; } = [];
 
     public IReadOnlyList<string> SortOptions { get; } = ["Name", "Recently played", "Date added", "Playtime", "Release date", "Platform", "Recently updated"];
 
@@ -111,6 +126,7 @@ public sealed class LibraryWorkspaceViewModel(
     public IReadOnlyList<string> LibraryCardSizeOptions { get; } = ["Small", "Medium", "Large"];
 
     public IReadOnlyList<string> SmartCollectionOptions { get; } = ["All games", "Favorites", "Recently played", "Manual games", "Steam games", "Missing targets"];
+    public IReadOnlyList<string> ArtworkKindOptions { get; } = ["Cover", "Hero", "Logo", "Background"];
 
     public IReadOnlyList<ThemeOption> ThemeOptions => themes.Themes;
 
@@ -416,11 +432,22 @@ public sealed class LibraryWorkspaceViewModel(
                     Arguments = string.Join(Environment.NewLine, value.LaunchTarget.Arguments);
                     WorkingDirectory = value.LaunchTarget.WorkingDirectory ?? string.Empty;
                     SaveSyncLabel = value.SaveSyncLabel ?? value.Name;
+                    IdentitySearchText = value.Name;
+                    ManualDescription = value.Metadata.Description?.Value ?? string.Empty;
+                    ManualGenres = JoinEditable(value.Metadata.Genres?.Value);
+                    ManualDevelopers = JoinEditable(value.Metadata.Developers?.Value);
+                    ManualPublishers = JoinEditable(value.Metadata.Publishers?.Value);
+                    ManualReleaseDate = value.Metadata.ReleaseDate?.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
                 }
 
                 OnPropertyChanged(nameof(HasSelection));
                 OnPropertyChanged(nameof(EditorTitle));
                 Achievements.Clear();
+                IdentityCandidates.Clear();
+                IdentitySearchFailures.Clear();
+                ArtworkVariants.Clear();
+                OnPropertyChanged(nameof(HasIdentityCandidates));
+                OnPropertyChanged(nameof(HasArtworkVariants));
                 OnPropertyChanged(nameof(AchievementSummary));
                 OnPropertyChanged(nameof(SelectedGamePlayTime));
                 OnPropertyChanged(nameof(SelectedGameReleaseDate));
@@ -433,6 +460,10 @@ public sealed class LibraryWorkspaceViewModel(
                 OnPropertyChanged(nameof(CanConfigureSaveFolder));
                 OnPropertyChanged(nameof(SelectedSaveDirectory));
                 OnPropertyChanged(nameof(SelectedSaveSyncIdentity));
+                OnPropertyChanged(nameof(CanMatchManualGame));
+                OnPropertyChanged(nameof(HasLinkedIdentity));
+                OnPropertyChanged(nameof(CanBrowseProviderArtwork));
+                OnPropertyChanged(nameof(LinkedIdentitySummary));
             }
         }
     }
@@ -492,6 +523,34 @@ public sealed class LibraryWorkspaceViewModel(
     public string WorkingDirectory { get => _workingDirectory; set => Set(ref _workingDirectory, value); }
 
     public string CollectionName { get => _collectionName; set => Set(ref _collectionName, value); }
+
+    public string IdentitySearchText { get => _identitySearchText; set => Set(ref _identitySearchText, value); }
+
+    public string ManualDescription { get => _manualDescription; set => Set(ref _manualDescription, value); }
+    public string ManualGenres { get => _manualGenres; set => Set(ref _manualGenres, value); }
+    public string ManualDevelopers { get => _manualDevelopers; set => Set(ref _manualDevelopers, value); }
+    public string ManualPublishers { get => _manualPublishers; set => Set(ref _manualPublishers, value); }
+    public string ManualReleaseDate { get => _manualReleaseDate; set => Set(ref _manualReleaseDate, value); }
+    public string SelectedArtworkKind { get => _selectedArtworkKind; set => Set(ref _selectedArtworkKind, value); }
+    public double ArtworkCropX { get => _artworkCropX; set => Set(ref _artworkCropX, value); }
+    public double ArtworkCropY { get => _artworkCropY; set => Set(ref _artworkCropY, value); }
+    public double ArtworkCropWidth { get => _artworkCropWidth; set => Set(ref _artworkCropWidth, value); }
+    public double ArtworkCropHeight { get => _artworkCropHeight; set => Set(ref _artworkCropHeight, value); }
+
+    public bool CanMatchManualGame => identityService is not null && string.Equals(SelectedGame?.Source, "Manual", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasLinkedIdentity => SelectedGame?.LinkedIdentity is not null;
+
+    public bool CanBrowseProviderArtwork => SelectedGame is { Source: "Steam" } || HasLinkedIdentity;
+
+    public bool HasIdentityCandidates => IdentityCandidates.Count > 0;
+
+    public bool HasArtworkVariants => ArtworkVariants.Count > 0;
+
+    public string LinkedIdentitySummary => SelectedGame?.LinkedIdentity is { } identity
+        ? $"Confirmed {identity.ProviderId}: {identity.DisplayName} ({identity.ProviderItemId})" +
+          (identity.SteamAppId is null ? string.Empty : $" · Steam App {identity.SteamAppId}")
+        : "No provider identity is linked. Metadata and achievements will not be inferred from the executable name.";
 
     public string BackupPath
     {
@@ -673,7 +732,9 @@ public sealed class LibraryWorkspaceViewModel(
         BeginAdd();
         Target = executablePath;
         WorkingDirectory = Path.GetDirectoryName(executablePath) ?? string.Empty;
-        Name = Path.GetFileNameWithoutExtension(executablePath);
+        Name = identityService?.SuggestName(executablePath) is { Length: > 0 } suggestion
+            ? suggestion
+            : Path.GetFileNameWithoutExtension(executablePath);
         NavigateTo("Library");
         Status = "Executable selected. Review the game name and save it to your library.";
     }
@@ -689,15 +750,16 @@ public sealed class LibraryWorkspaceViewModel(
     {
         if (SelectedGame is null || !CanChangeManualCover || manualCovers is null) return;
         var selected = SelectedGame;
-        var previous = selected.Artwork?.Cover;
-        var imported = await manualCovers.ImportAsync(selected.Id, path, cancellationToken);
+        var kind = ParseArtworkKind(SelectedArtworkKind);
+        var previous = GetArtwork(selected.Artwork, kind);
+        var imported = await manualCovers.ImportAsync(selected.Id, kind, path, cancellationToken);
         if (imported.Cover is null)
         {
             Status = imported.Error ?? "The cover could not be imported.";
             return;
         }
 
-        var save = await library.SetManualCoverAsync(selected.Id, imported.Cover, cancellationToken);
+        var save = await library.SetManualArtworkAsync(selected.Id, kind, imported.Cover, cancellationToken);
         if (save.Status != LibraryMutationStatus.Saved)
         {
             await manualCovers.DeleteManagedAsync(imported.Cover.Location, CancellationToken.None);
@@ -709,14 +771,15 @@ public sealed class LibraryWorkspaceViewModel(
             await manualCovers.DeleteManagedAsync(previous.Location, CancellationToken.None);
         SelectedGame = save.Item;
         RefreshGames();
-        Status = "Custom cover added. The source image was copied into NovaLauncher's bounded managed cache.";
+        Status = $"Custom {kind.ToString().ToLowerInvariant()} added. The source image was copied into NovaLauncher's bounded managed cache.";
     }
 
     public async Task RemoveManualCoverAsync(CancellationToken cancellationToken)
     {
         if (SelectedGame is null || !CanChangeManualCover || manualCovers is null) return;
-        var previous = SelectedGame.Artwork?.Cover;
-        var save = await library.SetManualCoverAsync(SelectedGame.Id, cover: null, cancellationToken);
+        var kind = ParseArtworkKind(SelectedArtworkKind);
+        var previous = GetArtwork(SelectedGame.Artwork, kind);
+        var save = await library.SetManualArtworkAsync(SelectedGame.Id, kind, artwork: null, cancellationToken);
         if (save.Status != LibraryMutationStatus.Saved)
         {
             Status = save.Error ?? "The custom cover could not be removed.";
@@ -726,7 +789,58 @@ public sealed class LibraryWorkspaceViewModel(
             await manualCovers.DeleteManagedAsync(previous.Location, CancellationToken.None);
         SelectedGame = save.Item;
         RefreshGames();
-        Status = "Custom cover removed. Installed game files were not touched.";
+        Status = $"Custom {kind.ToString().ToLowerInvariant()} removed. Installed game files were not touched.";
+    }
+
+    public async Task CropSelectedArtworkAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null || !CanChangeManualCover || manualCovers is null) return;
+        var kind = ParseArtworkKind(SelectedArtworkKind);
+        var previous = GetArtwork(SelectedGame.Artwork, kind);
+        if (previous is null || previous.IsPlaceholder)
+        {
+            Status = "Add or retrieve artwork before cropping it.";
+            return;
+        }
+        var crop = await manualCovers.CropAsync(
+            SelectedGame.Id, previous,
+            ArtworkCropX / 100d, ArtworkCropY / 100d,
+            ArtworkCropWidth / 100d, ArtworkCropHeight / 100d,
+            cancellationToken);
+        if (crop.Cover is null) { Status = crop.Error ?? "The artwork crop could not be created."; return; }
+        var save = await library.SetManualArtworkAsync(SelectedGame.Id, kind, crop.Cover, cancellationToken);
+        if (save.Status != LibraryMutationStatus.Saved)
+        {
+            await manualCovers.DeleteManagedAsync(crop.Cover.Location, CancellationToken.None);
+            Status = save.Error ?? "The cropped artwork could not be saved.";
+            return;
+        }
+        if (previous.Location != crop.Cover.Location) await manualCovers.DeleteManagedAsync(previous.Location, CancellationToken.None);
+        SelectedGame = save.Item;
+        RefreshGames();
+        Status = "Crop applied from the displayed percentages. Provider refresh now treats this artwork as a protected manual override.";
+    }
+
+    public async Task InspectArtworkCacheAsync(CancellationToken cancellationToken)
+    {
+        if (manualCovers is null) return;
+        var result = await manualCovers.InspectCacheAsync(cancellationToken);
+        Status = $"Managed artwork cache: {result.FileCount} files, {result.TotalBytes / 1024d / 1024d:0.##} MiB." +
+            (result.Error is null ? string.Empty : $" {result.Error}");
+    }
+
+    public async Task CleanupArtworkCacheAsync(CancellationToken cancellationToken)
+    {
+        if (manualCovers is null) return;
+        var retained = library.Games
+            .Where(static game => game.Artwork is not null)
+            .SelectMany(static game => new[] { game.Artwork!.Cover, game.Artwork.Hero, game.Artwork.Logo, game.Artwork.Background })
+            .Where(static artwork => !artwork.IsPlaceholder && artwork.Location.StartsWith("managed-artwork:///", StringComparison.OrdinalIgnoreCase))
+            .Select(static artwork => artwork.Location)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var result = await manualCovers.CleanupCacheAsync(retained, cancellationToken);
+        Status = $"Managed artwork cleanup removed {result.RemovedCount} orphan files ({result.RemovedBytes / 1024d / 1024d:0.##} MiB). " +
+            $"All {retained.Count} referenced assets were retained." + (result.Error is null ? string.Empty : $" {result.Error}");
     }
 
     public void EditSelectedGame()
@@ -852,6 +966,128 @@ public sealed class LibraryWorkspaceViewModel(
 
     public Task ForceRefreshSelectedMetadataAsync(CancellationToken cancellationToken) =>
         RefreshSelectedMetadataAsync(forceRefresh: true, cancellationToken);
+
+    public async Task SearchSelectedGameIdentityAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null || !CanMatchManualGame || identityService is null)
+        {
+            Status = "Select a manually added game before searching for identity matches.";
+            return;
+        }
+        var selectedId = SelectedGame.Id;
+        await RunBusyAsync(async () =>
+        {
+            Status = "Searching local Steam manifests and configured first-party providers…";
+            var result = await identityService.SearchAsync(SelectedGame, IdentitySearchText, cancellationToken);
+            if (SelectedGame?.Id != selectedId) return;
+            IdentityCandidates.Clear();
+            foreach (var candidate in result.Candidates) IdentityCandidates.Add(candidate);
+            IdentitySearchFailures.Clear();
+            foreach (var failure in result.Failures) IdentitySearchFailures.Add(failure);
+            OnPropertyChanged(nameof(HasIdentityCandidates));
+            Status = result.Candidates.Count == 0
+                ? "No identity was selected or linked. Refine the title or keep this game unlinked."
+                : $"Review {result.Candidates.Count} candidate(s). Nothing is linked or downloaded until you confirm one.";
+        });
+    }
+
+    public async Task ConfirmSelectedGameIdentityAsync(GameIdentityCandidate candidate, CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null || identityService is null) return;
+        var result = await identityService.ConfirmAsync(SelectedGame.Id, candidate, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved)
+        {
+            Status = result.Error ?? "The identity could not be linked.";
+            return;
+        }
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = $"Linked to {candidate.ProviderId} only after your confirmation. The manual executable remains the launch target.";
+    }
+
+    public void RejectIdentityCandidates()
+    {
+        IdentityCandidates.Clear();
+        IdentitySearchFailures.Clear();
+        OnPropertyChanged(nameof(HasIdentityCandidates));
+        Status = "No match selected. The game remains unlinked and no provider data was downloaded.";
+    }
+
+    public async Task UnlinkSelectedGameIdentityAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null || identityService is null || !HasLinkedIdentity) return;
+        var result = await identityService.UnlinkAsync(SelectedGame.Id, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved)
+        {
+            Status = result.Error ?? "The identity could not be unlinked.";
+            return;
+        }
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = "Provider identity unlinked. Existing manual overrides and downloaded artwork remain local.";
+    }
+
+    public async Task SaveManualMetadataAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null || !CanMatchManualGame) return;
+        DateOnly? releaseDate = null;
+        if (!string.IsNullOrWhiteSpace(ManualReleaseDate) &&
+            !DateOnly.TryParseExact(ManualReleaseDate.Trim(), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _))
+        {
+            Status = "Release date must use YYYY-MM-DD or be left blank.";
+            return;
+        }
+        else if (!string.IsNullOrWhiteSpace(ManualReleaseDate))
+            releaseDate = DateOnly.ParseExact(ManualReleaseDate.Trim(), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var result = await library.SetManualMetadataAsync(
+            SelectedGame.Id,
+            ManualDescription,
+            ParseEditableList(ManualGenres),
+            ParseEditableList(ManualDevelopers),
+            ParseEditableList(ManualPublishers),
+            releaseDate,
+            cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved) { Status = result.Error ?? "Manual metadata could not be saved."; return; }
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = "Manual metadata saved with protected provenance. Provider refresh will not overwrite these fields.";
+    }
+
+    public async Task RestoreProviderMetadataAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null || !CanMatchManualGame) return;
+        var result = await library.ClearManualMetadataProtectionAsync(SelectedGame.Id, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved) { Status = result.Error ?? "Manual protection could not be removed."; return; }
+        SelectedGame = result.Item;
+        await RefreshSelectedMetadataAsync(forceRefresh: true, cancellationToken);
+    }
+
+    public async Task PreviewArtworkVariantsAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null) return;
+        var kind = ParseArtworkKind(SelectedArtworkKind);
+        var result = await enrichment.PreviewArtworkVariantsAsync(SelectedGame.Id, kind, cancellationToken);
+        ArtworkVariants.Clear();
+        foreach (var candidate in result.Candidates) ArtworkVariants.Add(candidate);
+        OnPropertyChanged(nameof(HasArtworkVariants));
+        Status = result.Error ?? $"Review {result.Candidates.Count} bounded {kind.ToString().ToLowerInvariant()} variant(s). Nothing is downloaded until you choose one.";
+    }
+
+    public async Task ApplyArtworkVariantAsync(ArtworkCandidate candidate, CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null) return;
+        var result = await enrichment.ApplyArtworkVariantAsync(SelectedGame.Id, candidate, cancellationToken);
+        if (result.Status != ProviderResultStatus.Success || result.Item is null)
+        {
+            Status = result.Error ?? "The selected artwork variant could not be applied.";
+            return;
+        }
+        SelectedGame = result.Item;
+        RefreshGames();
+        ArtworkVariants.Clear();
+        OnPropertyChanged(nameof(HasArtworkVariants));
+        Status = "Selected provider artwork was validated, copied to the managed cache, and applied.";
+    }
 
     public async Task RefreshSelectedAchievementsAsync(CancellationToken cancellationToken)
     {
@@ -1338,6 +1574,25 @@ public sealed class LibraryWorkspaceViewModel(
 
     private static string JoinMetadata(IReadOnlyList<string>? values, string fallback) =>
         values is { Count: > 0 } ? string.Join(", ", values) : fallback;
+
+    private static string JoinEditable(IReadOnlyList<string>? values) => values is { Count: > 0 } ? string.Join(", ", values) : string.Empty;
+
+    private static string[]? ParseEditableList(string value)
+    {
+        var items = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        return items.Length == 0 ? null : items;
+    }
+
+    private static ArtworkKind ParseArtworkKind(string value) => Enum.TryParse<ArtworkKind>(value, ignoreCase: true, out var kind) ? kind : ArtworkKind.Cover;
+
+    private static ArtworkReference? GetArtwork(GameArtwork? artwork, ArtworkKind kind) => kind switch
+    {
+        ArtworkKind.Cover => artwork?.Cover,
+        ArtworkKind.Hero => artwork?.Hero,
+        ArtworkKind.Logo => artwork?.Logo,
+        _ => artwork?.Background,
+    };
 
     private void RefreshGames()
     {

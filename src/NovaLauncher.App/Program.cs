@@ -111,6 +111,7 @@ internal static class Program
         services.AddSingleton<CollectionCoordinator>();
         services.AddSingleton<LibraryWorkspaceViewModel>();
         services.AddSingleton<IGameEnrichmentService, GameEnrichmentService>();
+        services.AddSingleton<IGameIdentityService, GameIdentityService>();
         services.AddSingleton<IApiKeySession>(_ => new ApiKeySession(
             Environment.GetEnvironmentVariable("NOVALAUNCHER_STEAMGRIDDB_API_KEY")));
         var steamApiKey = Environment.GetEnvironmentVariable("NOVALAUNCHER_STEAM_WEB_API_KEY");
@@ -139,6 +140,7 @@ internal static class Program
             provider.GetRequiredService<IBoundedHttpClient>(),
             provider.GetRequiredService<TimeProvider>(),
             provider.GetRequiredService<IApiKeySession>()));
+        services.AddSingleton<IGameIdentitySearchProvider, SteamGridDbIdentitySearchProvider>();
         services.AddHttpClient("Providers", client => client.Timeout = TimeSpan.FromSeconds(10))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
             {

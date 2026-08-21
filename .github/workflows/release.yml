@@ -1,4 +1,4 @@
-name: Build unsigned alpha artifacts
+name: Build unsigned preview artifacts
 
 on:
   workflow_dispatch:
@@ -56,6 +56,6 @@ jobs:
       - name: Upload unsigned release candidates
         uses: actions/upload-artifact@v4
         with:
-          name: NovaLauncher-unsigned-alpha
+          name: NovaLauncher-unsigned-preview
           path: artifacts/release/*
           if-no-files-found: error
