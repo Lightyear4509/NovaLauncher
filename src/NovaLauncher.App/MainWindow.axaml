@@ -690,6 +690,21 @@
               <TextBlock Text="Steam-imported games are excluded and continue to use Steam Cloud where supported." TextWrapping="Wrap" />
             </StackPanel>
           </Border>
+          <Border Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="16" Padding="24">
+            <StackPanel Spacing="10">
+              <TextBlock Text="Official updates" FontSize="21" FontWeight="SemiBold" />
+              <TextBlock Text="NovaLauncher checks the fixed official GitHub repository only when you ask. Downloads require an exact SHA-256 match and a pinned valid Windows publisher signature before staging." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+              <ComboBox ItemsSource="{Binding Workspace.UpdateChannelOptions}" SelectedItem="{Binding Workspace.SelectedUpdateChannel}" AutomationProperties.Name="Official NovaLauncher update channel" />
+              <WrapPanel ItemSpacing="8">
+                <Button Content="Check for updates" Click="OnCheckForUpdates" AutomationProperties.Name="Check official NovaLauncher releases" />
+                <Button Content="Verify and stage installer" Click="OnStageUpdate" IsEnabled="{Binding Workspace.HasAvailableUpdate}" AutomationProperties.Name="Verify and stage signed NovaLauncher installer" />
+              </WrapPanel>
+              <ProgressBar Minimum="0" Maximum="100" Value="{Binding Workspace.UpdateProgress}" Height="8" AutomationProperties.Name="Official update download progress" />
+              <TextBlock Text="{Binding Workspace.UpdateStatus}" TextWrapping="Wrap" AutomationProperties.Name="Official update status" />
+              <TextBlock Text="{Binding Workspace.AvailableUpdate.ReleaseNotes}" IsVisible="{Binding Workspace.HasAvailableUpdate}" MaxHeight="180" TextWrapping="Wrap" AutomationProperties.Name="Official update release notes" />
+              <TextBlock Text="Installation is never automatic. Unsigned builds without an embedded publisher-certificate pin fail closed and cannot stage an update." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+            </StackPanel>
+          </Border>
           <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">
             <StackPanel Spacing="8">
               <TextBlock Text="Local diagnostics" FontSize="21" FontWeight="SemiBold" />
@@ -698,6 +713,8 @@
               <TextBlock Text="{Binding Workspace.AchievementSummary, StringFormat='Achievements: {0}'}" TextWrapping="Wrap" />
               <TextBlock Text="Network activity occurs only when you explicitly import or refresh provider data." TextWrapping="Wrap" />
               <TextBlock Text="Logs are structured and local; API keys and raw configured account IDs are not logged." TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Workspace.CrashRecoveryStatus}" TextWrapping="Wrap" AutomationProperties.Name="Previous session recovery status" />
+              <Button Content="Export sanitized diagnostics" Click="OnExportDiagnostics" HorizontalAlignment="Left" AutomationProperties.Name="Export sanitized local diagnostics" />
             </StackPanel>
           </Border>
         </StackPanel>

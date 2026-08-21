@@ -543,6 +543,7 @@ public sealed class LibraryWorkspaceViewModelTests
         public bool ReduceMotion { get; private set; }
         public LibraryViewPreferences LibraryPreferences { get; private set; } = new("Grid", "Medium", "Name", "All sources", "All platforms", "All games", false);
         public string? TailscalePeerAddress => null;
+        public string UpdateChannel { get; private set; } = "Stable";
         public Task<string?> InitializeAsync(CancellationToken cancellationToken) => Task.FromResult<string?>(null);
         public Task<string?> ApplyAsync(string themeId, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
         public Task<string?> ConfigureReduceMotionAsync(bool reduceMotion, CancellationToken cancellationToken)
@@ -551,6 +552,7 @@ public sealed class LibraryWorkspaceViewModelTests
             return Task.FromResult<string?>(null);
         }
         public Task<string?> ConfigureTailscalePeerAsync(string address, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+        public Task<string?> ConfigureUpdateChannelAsync(string channel, CancellationToken cancellationToken) { UpdateChannel = channel; return Task.FromResult<string?>(null); }
         public Task<string?> SaveLibraryPreferencesAsync(LibraryViewPreferences preferences, CancellationToken cancellationToken)
         {
             LibraryPreferences = preferences;

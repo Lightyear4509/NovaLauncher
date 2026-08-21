@@ -36,6 +36,8 @@ public interface IThemeService
 
     string? TailscalePeerAddress { get; }
 
+    string UpdateChannel { get; }
+
     Task<string?> InitializeAsync(CancellationToken cancellationToken);
 
     Task<string?> ApplyAsync(string themeId, CancellationToken cancellationToken);
@@ -45,6 +47,8 @@ public interface IThemeService
     Task<string?> SaveLibraryPreferencesAsync(LibraryViewPreferences preferences, CancellationToken cancellationToken);
 
     Task<string?> ConfigureTailscalePeerAsync(string address, CancellationToken cancellationToken);
+
+    Task<string?> ConfigureUpdateChannelAsync(string channel, CancellationToken cancellationToken);
 }
 
 public sealed class ThemeService(
@@ -79,6 +83,8 @@ public sealed class ThemeService(
 
     public string? TailscalePeerAddress => _settings.Settings.TailscalePeerAddress;
 
+    public string UpdateChannel => _settings.Settings.UpdateChannel;
+
     public async Task<string?> InitializeAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -87,6 +93,11 @@ public sealed class ThemeService(
             if (_initialized) return null;
             var load = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
             _settings = load.Document ?? SettingsDocument.Default;
+            if (load.Status == DocumentLoadStatus.MigratedLegacy)
+            {
+                var migrationSave = await store.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
+                if (migrationSave.Status != DocumentSaveStatus.Saved) return migrationSave.Error ?? "The settings migration could not be committed; the previous file was preserved.";
+            }
             var themeId = Themes.Any(item => item.Id == _settings.Settings.ThemeId) ? _settings.Settings.ThemeId : "nova-dark";
             if (!host.Apply(themeId)) return "The saved theme could not be applied; Nova Dark is active.";
             if (!host.ApplyMotionPreference(_settings.Settings.ReduceMotion))
@@ -205,6 +216,20 @@ public sealed class ThemeService(
         {
             _gate.Release();
         }
+    }
+
+    public async Task<string?> ConfigureUpdateChannelAsync(string channel, CancellationToken cancellationToken)
+    {
+        if (channel is not ("Stable" or "Beta" or "Alpha")) return "The selected update channel is invalid.";
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var staged = _settings with { Settings = _settings.Settings with { UpdateChannel = channel } };
+            var save = await store.SaveAsync(staged, cancellationToken).ConfigureAwait(false);
+            if (save.Status != DocumentSaveStatus.Saved) return save.Error ?? "The update channel could not be saved.";
+            _settings = staged; return null;
+        }
+        finally { _gate.Release(); }
     }
 
     public void Dispose() => _gate.Dispose();

@@ -21,6 +21,9 @@ using NovaLauncher.Application.SaveSync;
 using NovaLauncher.Application.GameTransfer;
 using NovaLauncher.Infrastructure.GameTransfer;
 using NovaLauncher.Infrastructure.SaveSync;
+using NovaLauncher.Application.Lifecycle;
+using NovaLauncher.Infrastructure.Lifecycle;
+using System.Reflection;
 
 namespace NovaLauncher.App;
 
@@ -53,10 +56,14 @@ internal static class Program
         {
             if (steamImportDiagnostic)
             {
-                return RunSteamImportDiagnosticAsync(serviceProvider).GetAwaiter().GetResult();
+                var diagnosticExitCode = RunSteamImportDiagnosticAsync(serviceProvider).GetAwaiter().GetResult();
+                if (diagnosticExitCode == 0) serviceProvider.GetRequiredService<ICrashRecoveryService>().CompleteSession();
+                return diagnosticExitCode;
             }
 
-            return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            var exitCode = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            if (exitCode == 0) serviceProvider.GetRequiredService<ICrashRecoveryService>().CompleteSession();
+            return exitCode;
         }
         catch (Exception exception)
         {
@@ -187,6 +194,30 @@ internal static class Program
             dataRoot,
             provider.GetRequiredService<IReceivedContentScanner>()));
         services.AddSingleton<IGameTransferService>(provider => provider.GetRequiredService<GameTransferCoordinator>());
+        services.AddSingleton<IAuthenticodeVerifier, WindowsAuthenticodeVerifier>();
+        services.AddHttpClient("OfficialUpdates", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd($"NovaLauncher/{NovaLauncher.Domain.ProductIdentity.Version}");
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+        });
+        var trustedPublisherPins = typeof(Program).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Where(static attribute => string.Equals(attribute.Key, "NovaLauncherUpdatePublisherSha256", StringComparison.Ordinal))
+            .Select(static attribute => attribute.Value ?? string.Empty)
+            .SelectMany(static value => value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(static pin => pin.ToLowerInvariant())
+            .Where(static pin => pin.Length == 64 && pin.All(Uri.IsHexDigit))
+            .ToHashSet(StringComparer.Ordinal);
+        services.AddSingleton<IUpdateService>(provider => new GitHubUpdateService(
+            provider.GetRequiredService<IHttpClientFactory>().CreateClient("OfficialUpdates"),
+            provider.GetRequiredService<IAuthenticodeVerifier>(),
+            Path.Combine(dataRoot, "Updates", "Staging"),
+            trustedPublisherPins));
+        services.AddSingleton<IDiagnosticExportService>(_ => new SanitizedDiagnosticExportService(dataRoot, TimeProvider.System));
+        var crashRecovery = new CrashRecoveryService(dataRoot, TimeProvider.System);
+        var recoveryState = crashRecovery.BeginSession();
+        services.AddSingleton<ICrashRecoveryService>(crashRecovery);
+        services.AddSingleton(recoveryState);
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IAtomicFileSystem, PhysicalAtomicFileSystem>();
         services.AddSingleton<IDocumentStore<GamesDocument>>(provider =>

@@ -77,5 +77,12 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("AutomationProperties.Name=\"Built-in color theme\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Apply selected built-in theme\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Tailscale peer IP address\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Official NovaLauncher update channel\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Check official NovaLauncher releases\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Verify and stage signed NovaLauncher installer\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Official update download progress\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Official update release notes\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Previous session recovery status\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Export sanitized local diagnostics\"", xaml, StringComparison.Ordinal);
     }
 }

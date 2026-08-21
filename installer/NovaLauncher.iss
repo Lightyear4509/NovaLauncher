@@ -1,5 +1,5 @@
 #define AppName "NovaLauncher"
-#define AppVersion "0.5.0-experimental.1"
+#define AppVersion "0.6.0-alpha.1"
 #define AppPublisher "NovaLauncher Contributors"
 
 [Setup]
@@ -9,9 +9,9 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 VersionInfoCompany={#AppPublisher}
-VersionInfoDescription={#AppName} unsigned beta preview installer
+VersionInfoDescription={#AppName} signed lifecycle candidate installer
 VersionInfoProductName={#AppName}
-VersionInfoProductVersion=0.3.0.1
+VersionInfoProductVersion=0.6.0.1
 DefaultDirName={localappdata}\Programs\NovaLauncher
 DefaultGroupName=NovaLauncher
 PrivilegesRequired=lowest
@@ -19,13 +19,12 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\artifacts\release
-OutputBaseFilename=NovaLauncher-Setup-0.5.0-experimental.1-win-x64
+OutputBaseFilename=NovaLauncher-Setup-0.6.0-alpha.1-win-x64
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern dynamic
 WizardSizePercent=110
 LicenseFile=..\LICENSE
-InfoBeforeFile=UNSIGNED-PREVIEW.txt
 UninstallDisplayIcon={app}\NovaLauncher.App.exe
 ChangesAssociations=no
 ChangesEnvironment=no
@@ -38,7 +37,6 @@ DisableProgramGroupPage=yes
 Source: "..\artifacts\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "UNSIGNED-PREVIEW.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\NovaLauncher"; Filename: "{app}\NovaLauncher.App.exe"; WorkingDir: "{app}"

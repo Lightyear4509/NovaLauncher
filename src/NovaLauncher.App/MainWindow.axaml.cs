@@ -198,6 +198,25 @@ public sealed partial class MainWindow : Window
     private void OnApplySteamGridDbKey(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
         ViewModel.Workspace!.ApplySteamGridDbApiKey();
 
+    private async void OnCheckForUpdates(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.CheckForUpdatesAsync(_lifetimeCancellation.Token));
+
+    private async void OnStageUpdate(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.StageAvailableUpdateAsync(_lifetimeCancellation.Token));
+
+    private async void OnExportDiagnostics(object? sender, RoutedEventArgs e)
+    {
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export sanitized NovaLauncher diagnostics",
+            SuggestedFileName = $"NovaLauncher-Diagnostics-{DateTime.UtcNow:yyyyMMdd}.zip",
+            DefaultExtension = "zip",
+            FileTypeChoices = [new FilePickerFileType("ZIP archive") { Patterns = ["*.zip"] }],
+        });
+        var path = file?.TryGetLocalPath();
+        if (!string.IsNullOrWhiteSpace(path)) await ExecuteAsync(() => ViewModel.Workspace!.ExportDiagnosticsAsync(path, _lifetimeCancellation.Token));
+    }
+
     private async void OnSaveTailscalePeer(object? sender, RoutedEventArgs e) =>
         await ExecuteAsync(() => ViewModel.Workspace!.ConfigureTailscalePeerAsync(_lifetimeCancellation.Token));
 

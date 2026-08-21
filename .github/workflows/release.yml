@@ -1,4 +1,4 @@
-name: Build unsigned preview artifacts
+name: Build signed release artifacts
 
 on:
   workflow_dispatch:
@@ -52,10 +52,23 @@ jobs:
           }
       - name: Build installer, portable ZIP, SBOM, and checksums
         shell: pwsh
-        run: .\eng\Build-Release.ps1 -DotNetPath (Get-Command dotnet).Source
-      - name: Upload unsigned release candidates
+        env:
+          NOVALAUNCHER_SIGNING_CERTIFICATE_BASE64: ${{ secrets.NOVALAUNCHER_SIGNING_CERTIFICATE_BASE64 }}
+          NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NOVALAUNCHER_SIGNING_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD)) {
+            throw 'Phase 6 releases require the NovaLauncher code-signing certificate and password secrets.'
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'novalauncher-signing.pfx'
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:NOVALAUNCHER_SIGNING_CERTIFICATE_BASE64))
+          try {
+            .\eng\Build-Release.ps1 -DotNetPath (Get-Command dotnet).Source -SigningCertificatePath $certificatePath -SigningCertificatePassword $env:NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD
+          } finally {
+            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload signed release candidates
         uses: actions/upload-artifact@v4
         with:
-          name: NovaLauncher-unsigned-preview
+          name: NovaLauncher-signed-release
           path: artifacts/release/*
           if-no-files-found: error

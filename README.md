@@ -180,7 +180,9 @@ NovaLauncher is local-first:
 - Pairing secrets are kept out of JSON, logs, exports, and release artifacts.
 - Online metadata and artwork requests occur only for configured supported providers.
 - Save synchronization is limited to folders you explicitly map and peers you explicitly pair.
-- Plugins, scripting, marketplaces, ROM acquisition, and downloaded-code execution are not supported.
+- Plugins, scripting, marketplaces, ROM acquisition, and general downloaded-code execution are not supported. The Phase 6 updater is narrowly limited to explicitly requested official releases and fails closed unless size, SHA-256, Authenticode trust, and an embedded publisher-certificate pin all validate; it never runs an installer automatically.
+
+See [Privacy](PRIVACY.md), [Security](SECURITY.md), and [Support](SUPPORT.md) for the public policies and reporting channels.
 
 ## Current release status
 
