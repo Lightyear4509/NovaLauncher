@@ -40,6 +40,7 @@ Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\NovaLauncher"; Filename: "{app}\NovaLauncher.App.exe"; WorkingDir: "{app}"
+Name: "{group}\NovaLauncher Update Recovery"; Filename: "{app}\NovaLauncher.App.exe"; Parameters: "--rollback-update"; WorkingDir: "{app}"; Comment: "Reopen the verified previous NovaLauncher installer after a failed update"
 Name: "{userdesktop}\NovaLauncher"; Filename: "{app}\NovaLauncher.App.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Tasks]
@@ -47,3 +48,20 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 
 [Run]
 Filename: "{app}\NovaLauncher.App.exe"; Description: "Launch NovaLauncher"; Flags: nowait postinstall skipifsilent
+
+[Code]
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  CacheDirectory: String;
+  CachedInstaller: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    CacheDirectory := ExpandConstant('{localappdata}\NovaLauncher\Updates\InstallerCache');
+    CachedInstaller := CacheDirectory + '\NovaLauncher-Setup-{#AppVersion}-win-x64.exe';
+    if not ForceDirectories(CacheDirectory) then
+      RaiseException('NovaLauncher could not create its signed installer recovery cache.');
+    if not CopyFile(ExpandConstant('{srcexe}'), CachedInstaller, False) then
+      RaiseException('NovaLauncher could not preserve the signed installer for update recovery.');
+  end;
+end;

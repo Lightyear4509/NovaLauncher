@@ -5,7 +5,7 @@ using NovaLauncher.Domain;
 
 namespace NovaLauncher.Infrastructure.Lifecycle;
 
-public sealed class GitHubUpdateService(HttpClient http, IAuthenticodeVerifier authenticode, IUpdateInstallerLauncher installerLauncher, string stagingRoot, IReadOnlySet<string> trustedCertificateSha256) : IUpdateService
+public sealed class GitHubUpdateService(HttpClient http, IAuthenticodeVerifier authenticode, IUpdateInstallerLauncher installerLauncher, IUpdateRecoveryService recovery, string stagingRoot, IReadOnlySet<string> trustedCertificateSha256) : IUpdateService
 {
     public const long MaximumMetadataBytes = 1024 * 1024;
     public const long MaximumInstallerBytes = 256L * 1024 * 1024;
@@ -73,6 +73,7 @@ public sealed class GitHubUpdateService(HttpClient http, IAuthenticodeVerifier a
             var expectedHash = ParseChecksum(sums, info.Name); var actualHash = await HashFileAsync(actualPath, cancellationToken).ConfigureAwait(false);
             if (!CryptographicOperations.FixedTimeEquals(actualHash, Convert.FromHexString(expectedHash))) return new(false, "The staged installer hash changed after verification.");
             var signature = authenticode.Verify(actualPath, trustedCertificateSha256); if (!signature.Trusted) return new(false, signature.Message);
+            await recovery.RecordPendingAsync(release.Version, cancellationToken).ConfigureAwait(false);
             return installerLauncher.Launch(actualPath)
                 ? new(true, "The verified installer was opened after explicit confirmation. Complete or cancel it in Windows Setup.")
                 : new(false, "Windows did not open the verified installer.");

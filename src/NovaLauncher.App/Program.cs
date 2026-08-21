@@ -46,6 +46,7 @@ internal static class Program
     {
         var smokeTest = args.Contains("--smoke-test", StringComparer.Ordinal);
         var steamImportDiagnostic = args.Contains("--steam-import-diagnostic", StringComparer.Ordinal);
+        var rollbackUpdate = args.Contains("--rollback-update", StringComparer.Ordinal);
         using var serviceProvider = ConfigureServices(smokeTest || steamImportDiagnostic);
         Services = serviceProvider;
 
@@ -57,12 +58,18 @@ internal static class Program
             if (steamImportDiagnostic)
             {
                 var diagnosticExitCode = RunSteamImportDiagnosticAsync(serviceProvider).GetAwaiter().GetResult();
-                if (diagnosticExitCode == 0) serviceProvider.GetRequiredService<ICrashRecoveryService>().CompleteSession();
+                if (diagnosticExitCode == 0) CompleteHealthySession(serviceProvider);
                 return diagnosticExitCode;
             }
 
+            if (rollbackUpdate)
+            {
+                var rollback = serviceProvider.GetRequiredService<IUpdateRecoveryService>().LaunchRollbackAsync(CancellationToken.None).GetAwaiter().GetResult();
+                Console.WriteLine(rollback.Message); if (rollback.Success) CompleteHealthySession(serviceProvider); return rollback.Success ? 0 : 4;
+            }
+
             var exitCode = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
-            if (exitCode == 0) serviceProvider.GetRequiredService<ICrashRecoveryService>().CompleteSession();
+            if (exitCode == 0) CompleteHealthySession(serviceProvider);
             return exitCode;
         }
         catch (Exception exception)
@@ -209,10 +216,12 @@ internal static class Program
             .Select(static pin => pin.ToLowerInvariant())
             .Where(static pin => pin.Length == 64 && pin.All(Uri.IsHexDigit))
             .ToHashSet(StringComparer.Ordinal);
+        services.AddSingleton<IUpdateRecoveryService>(provider => new UpdateRecoveryService(dataRoot, provider.GetRequiredService<IAuthenticodeVerifier>(), provider.GetRequiredService<IUpdateInstallerLauncher>(), trustedPublisherPins, TimeProvider.System));
         services.AddSingleton<IUpdateService>(provider => new GitHubUpdateService(
             provider.GetRequiredService<IHttpClientFactory>().CreateClient("OfficialUpdates"),
             provider.GetRequiredService<IAuthenticodeVerifier>(),
             provider.GetRequiredService<IUpdateInstallerLauncher>(),
+            provider.GetRequiredService<IUpdateRecoveryService>(),
             Path.Combine(dataRoot, "Updates", "Staging"),
             trustedPublisherPins));
         services.AddSingleton<IDiagnosticExportService>(_ => new SanitizedDiagnosticExportService(dataRoot, TimeProvider.System));
@@ -264,5 +273,11 @@ internal static class Program
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
         provider.GetRequiredService<GameTransferCoordinator>().AttachEndpoint();
         return provider;
+    }
+
+    private static void CompleteHealthySession(IServiceProvider services)
+    {
+        services.GetRequiredService<ICrashRecoveryService>().CompleteSession();
+        services.GetRequiredService<IUpdateRecoveryService>().CompleteHealthySession();
     }
 }

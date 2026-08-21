@@ -143,13 +143,58 @@ public sealed class LifecycleServicesTests : IDisposable
         Assert.Equal(DocumentSaveStatus.Saved, save.Status); Assert.True(File.Exists(Path.Combine(fixture.Root, "settings.json.bak")));
     }
 
+    [Fact]
+    public async Task UpdateRecoveryOpensOnlyCachedPinnedPreviousVersion()
+    {
+        var dataRoot = Path.Combine(_root, "recovery"); var cache = Path.Combine(dataRoot, "Updates", "InstallerCache"); Directory.CreateDirectory(cache);
+        var cached = Path.Combine(cache, $"NovaLauncher-Setup-{NovaLauncher.Domain.ProductIdentity.Version}-win-x64.exe"); File.Copy(typeof(LifecycleServicesTests).Assembly.Location, cached);
+        var launcher = new FakeInstallerLauncher(); var recovery = new UpdateRecoveryService(dataRoot, new FakeAuthenticode(true), launcher, new HashSet<string> { new('a', 64) }, TimeProvider.System);
+        await recovery.RecordPendingAsync("0.7.0-alpha.1", CancellationToken.None);
+
+        var result = await recovery.LaunchRollbackAsync(CancellationToken.None);
+
+        Assert.True(result.Success, result.Message); Assert.Equal(cached, launcher.LaunchedPath); Assert.True(recovery.State.RollbackAvailable);
+    }
+
+    [Fact]
+    public async Task HealthySessionClearsPendingUpdateReceipt()
+    {
+        var dataRoot = Path.Combine(_root, "healthy"); var recovery = new UpdateRecoveryService(dataRoot, new FakeAuthenticode(true), new FakeInstallerLauncher(), new HashSet<string> { new('a', 64) }, TimeProvider.System);
+        await recovery.RecordPendingAsync(NovaLauncher.Domain.ProductIdentity.Version, CancellationToken.None);
+
+        recovery.CompleteHealthySession();
+
+        Assert.False(recovery.State.RollbackAvailable); Assert.False(File.Exists(Path.Combine(dataRoot, "Updates", "pending-update.json")));
+    }
+
+    [Fact]
+    public async Task OldAppShutdownKeepsReceiptUntilCancelledUpdateRestartIsHealthy()
+    {
+        var dataRoot = Path.Combine(_root, "handoff-receipt"); var firstSession = new UpdateRecoveryService(dataRoot, new FakeAuthenticode(true), new FakeInstallerLauncher(), new HashSet<string> { new('a', 64) }, TimeProvider.System);
+        await firstSession.RecordPendingAsync("0.7.0-alpha.1", CancellationToken.None);
+
+        firstSession.CompleteHealthySession();
+        Assert.True(File.Exists(Path.Combine(dataRoot, "Updates", "pending-update.json")));
+        var restartedOldVersion = new UpdateRecoveryService(dataRoot, new FakeAuthenticode(true), new FakeInstallerLauncher(), new HashSet<string> { new('a', 64) }, TimeProvider.System);
+        restartedOldVersion.CompleteHealthySession();
+
+        Assert.False(File.Exists(Path.Combine(dataRoot, "Updates", "pending-update.json")));
+    }
+
     private static UpdateRelease Release(long size) => new("0.6.0", "v0.6.0", "notes", new("https://github.com/Lightyear4509/NovaLauncher/releases/download/v0.6.0/setup.exe"), new("https://github.com/Lightyear4509/NovaLauncher/releases/download/v0.6.0/sums"), size, false);
-    private GitHubUpdateService CreateUpdateService(RoutingHandler handler, IAuthenticodeVerifier authenticode, IUpdateInstallerLauncher launcher, string stagingName, bool hasPin) => new(new HttpClient(handler), authenticode, launcher, Path.Combine(_root, stagingName), hasPin ? new HashSet<string> { new('a', 64) } : new HashSet<string>());
+    private GitHubUpdateService CreateUpdateService(RoutingHandler handler, IAuthenticodeVerifier authenticode, IUpdateInstallerLauncher launcher, string stagingName, bool hasPin) => new(new HttpClient(handler), authenticode, launcher, new FakeUpdateRecovery(), Path.Combine(_root, stagingName), hasPin ? new HashSet<string> { new('a', 64) } : new HashSet<string>());
     private static string ReleasesJson(string tag, bool prerelease, long size) => $$"""[{"draft":false,"prerelease":{{prerelease.ToString().ToLowerInvariant()}},"tag_name":"{{tag}}","body":"notes","assets":[{"name":"NovaLauncher-Setup-0.6.0-win-x64.exe","size":{{size}},"browser_download_url":"https://github.com/Lightyear4509/NovaLauncher/releases/download/{{tag}}/NovaLauncher-Setup-0.6.0-win-x64.exe"},{"name":"SHA256SUMS.txt","size":100,"browser_download_url":"https://github.com/Lightyear4509/NovaLauncher/releases/download/{{tag}}/SHA256SUMS.txt"}]}]""";
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); GC.SuppressFinalize(this); }
 
     private sealed class FakeAuthenticode(bool trusted) : IAuthenticodeVerifier { public AuthenticodeVerification Verify(string path, IReadOnlySet<string> pins) => new(trusted, trusted ? "valid" : "invalid"); }
     private sealed class FakeInstallerLauncher : IUpdateInstallerLauncher { public string? LaunchedPath { get; private set; } public bool Launch(string path) { LaunchedPath = path; return true; } }
+    private sealed class FakeUpdateRecovery : IUpdateRecoveryService
+    {
+        public UpdateRecoveryState State => new(false, "none");
+        public Task RecordPendingAsync(string targetVersion, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<UpdateLaunchResult> LaunchRollbackAsync(CancellationToken cancellationToken) => Task.FromResult(new UpdateLaunchResult(false, "none"));
+        public void CompleteHealthySession() { }
+    }
     private sealed class RoutingHandler : HttpMessageHandler
     {
         private readonly Dictionary<string, byte[]> _responses = new(StringComparer.OrdinalIgnoreCase); public int RequestCount { get; private set; }

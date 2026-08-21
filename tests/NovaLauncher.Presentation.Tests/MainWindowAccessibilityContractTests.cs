@@ -85,6 +85,8 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("AutomationProperties.Name=\"Confirm launching verified NovaLauncher installer\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Open reverified NovaLauncher installer\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Previous session recovery status\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Failed update rollback status\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Open verified previous NovaLauncher installer\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Export sanitized local diagnostics\"", xaml, StringComparison.Ordinal);
     }
 }

@@ -36,7 +36,8 @@ public sealed class LibraryWorkspaceViewModel(
     IGameTransferService? gameTransfers = null,
     IUpdateService? updates = null,
     IDiagnosticExportService? diagnostics = null,
-    CrashRecoveryState? crashRecovery = null) : INotifyPropertyChanged
+    CrashRecoveryState? crashRecovery = null,
+    IUpdateRecoveryService? updateRecovery = null) : INotifyPropertyChanged
 {
     private LibraryItem? _selectedGame;
     private GameCollection? _selectedCollection;
@@ -163,6 +164,8 @@ public sealed class LibraryWorkspaceViewModel(
     public bool ConfirmUpdateInstall { get => _confirmUpdateInstall; set { if (Set(ref _confirmUpdateInstall, value)) OnPropertyChanged(nameof(CanLaunchStagedUpdate)); } }
     public bool CanLaunchStagedUpdate => AvailableUpdate is not null && !string.IsNullOrWhiteSpace(_stagedUpdatePath) && ConfirmUpdateInstall;
     public string CrashRecoveryStatus => crashRecovery?.Message ?? "Crash recovery state is unavailable.";
+    public string UpdateRecoveryStatus => updateRecovery?.State.Message ?? "Update rollback state is unavailable.";
+    public bool CanRollbackUpdate => updateRecovery?.State.RollbackAvailable == true;
 
     public TrustedSaveSyncPeer? SelectedTrustedPeer
     {
@@ -297,6 +300,12 @@ public sealed class LibraryWorkspaceViewModel(
         if (updates is null || AvailableUpdate is null || string.IsNullOrWhiteSpace(_stagedUpdatePath) || !ConfirmUpdateInstall) { UpdateStatus = "Verify, stage, and explicitly confirm the installer first."; return; }
         var result = await updates.LaunchStagedAsync(AvailableUpdate, _stagedUpdatePath, cancellationToken).ConfigureAwait(false); UpdateStatus = result.Message;
         if (result.Success) ConfirmUpdateInstall = false;
+    }
+
+    public async Task RollbackUpdateAsync(CancellationToken cancellationToken)
+    {
+        if (updateRecovery is null) { UpdateStatus = "Update rollback is unavailable."; return; }
+        var result = await updateRecovery.LaunchRollbackAsync(cancellationToken).ConfigureAwait(false); UpdateStatus = result.Message;
     }
 
     public async Task ExportDiagnosticsAsync(string destination, CancellationToken cancellationToken)

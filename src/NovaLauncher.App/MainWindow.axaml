@@ -716,6 +716,8 @@
               <TextBlock Text="Network activity occurs only when you explicitly import or refresh provider data." TextWrapping="Wrap" />
               <TextBlock Text="Logs are structured and local; API keys and raw configured account IDs are not logged." TextWrapping="Wrap" />
               <TextBlock Text="{Binding Workspace.CrashRecoveryStatus}" TextWrapping="Wrap" AutomationProperties.Name="Previous session recovery status" />
+              <TextBlock Text="{Binding Workspace.UpdateRecoveryStatus}" TextWrapping="Wrap" AutomationProperties.Name="Failed update rollback status" />
+              <Button Content="Open verified rollback installer" Click="OnRollbackUpdate" IsEnabled="{Binding Workspace.CanRollbackUpdate}" HorizontalAlignment="Left" AutomationProperties.Name="Open verified previous NovaLauncher installer" />
               <Button Content="Export sanitized diagnostics" Click="OnExportDiagnostics" HorizontalAlignment="Left" AutomationProperties.Name="Export sanitized local diagnostics" />
             </StackPanel>
           </Border>
