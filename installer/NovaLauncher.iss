@@ -1,6 +1,12 @@
 #define AppName "NovaLauncher"
 #define AppVersion "0.6.0-alpha.1"
 #define AppPublisher "NovaLauncher Contributors"
+#ifndef ArtifactSuffix
+  #define ArtifactSuffix ""
+#endif
+#ifndef UnsignedPreview
+  #define UnsignedPreview 0
+#endif
 
 [Setup]
 AppId={{A348AA9D-C3D4-49B9-82F0-F9A82F34FD11}
@@ -9,7 +15,7 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 VersionInfoCompany={#AppPublisher}
-VersionInfoDescription={#AppName} signed lifecycle candidate installer
+VersionInfoDescription={#AppName} {#if UnsignedPreview}unsigned preview{#else}signed lifecycle candidate{#endif} installer
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion=0.6.0.1
 DefaultDirName={localappdata}\Programs\NovaLauncher
@@ -19,7 +25,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\artifacts\release
-OutputBaseFilename=NovaLauncher-Setup-0.6.0-alpha.1-win-x64
+OutputBaseFilename=NovaLauncher-Setup-0.6.0-alpha.1{#ArtifactSuffix}-win-x64
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern dynamic
@@ -49,6 +55,18 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 [Run]
 Filename: "{app}\NovaLauncher.App.exe"; Description: "Launch NovaLauncher"; Flags: nowait postinstall skipifsilent
 
+#if UnsignedPreview
+[Code]
+function InitializeSetup(): Boolean;
+begin
+  Result := MsgBox(
+    'This NovaLauncher preview is not digitally signed. Windows cannot verify its publisher. ' +
+    'Install only if you downloaded it from the official GitHub release and verified its SHA-256 checksum.' + #13#10 + #13#10 +
+    'Continue with the unsigned preview?',
+    mbConfirmation,
+    MB_YESNO) = IDYES;
+end;
+#else
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);
 var
@@ -65,3 +83,4 @@ begin
       RaiseException('NovaLauncher could not preserve the signed installer for update recovery.');
   end;
 end;
+#endif
