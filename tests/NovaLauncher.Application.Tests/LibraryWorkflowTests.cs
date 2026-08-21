@@ -209,6 +209,58 @@ public sealed class LibraryWorkflowTests
         Assert.Equal(survivor, Assert.Single(Assert.Single(coordinator.Collections).GameIds));
     }
 
+    [Fact]
+    public async Task ManualMetadataIsProtectedAndCanBeExplicitlyRestored()
+    {
+        var store = new MemoryGamesStore();
+        using var coordinator = new LibraryCoordinator(store, new ManualGameDraftValidator(), TimeProvider.System);
+        var game = Assert.IsType<LibraryItem>((await coordinator.AddManualGameAsync(Draft("Manual"), CancellationToken.None)).Item);
+
+        var saved = await coordinator.SetManualMetadataAsync(
+            game.Id, "My description", ["RPG"], ["Studio"], ["Publisher"], new DateOnly(2025, 1, 2), CancellationToken.None);
+        var manual = Assert.IsType<LibraryItem>(saved.Item);
+        Assert.True(manual.Metadata.Description!.Provenance.IsManual);
+        Assert.Equal("My description", manual.Metadata.Description.Value);
+
+        var provider = new MetadataProvenance("Provider", "1", DateTimeOffset.UtcNow, false);
+        var enriched = await coordinator.ApplyEnrichmentAsync(
+            game.Id,
+            manual.Metadata with { Rating = new MetadataValue<decimal>(90, provider) },
+            new GameArtwork(
+                Placeholder(ArtworkKind.Cover), Placeholder(ArtworkKind.Hero), Placeholder(ArtworkKind.Logo), Placeholder(ArtworkKind.Background)),
+            CancellationToken.None);
+        Assert.Equal("My description", enriched.Item!.Metadata.Description!.Value);
+        await coordinator.ClearManualMetadataProtectionAsync(game.Id, CancellationToken.None);
+        var lastKnown = Assert.Single(coordinator.Games).Metadata.Description;
+        Assert.NotNull(lastKnown);
+        Assert.False(lastKnown.Provenance.IsManual);
+        Assert.Equal("My description", lastKnown.Value);
+        Assert.Equal("NovaLauncherLastKnown", lastKnown.Provenance.Source);
+    }
+
+    [Fact]
+    public async Task DuplicateMergePreservesOneConfirmedIdentityAndRefusesConflicts()
+    {
+        var store = new MemoryGamesStore();
+        using var coordinator = new LibraryCoordinator(store, new ManualGameDraftValidator(), TimeProvider.System);
+        var first = Assert.IsType<LibraryItem>((await coordinator.AddManualGameAsync(Draft("First"), CancellationToken.None)).Item);
+        var second = Assert.IsType<LibraryItem>((await coordinator.AddManualGameAsync(Draft("Second"), CancellationToken.None)).Item);
+        var steam = new LinkedGameIdentity("Steam", "70", "Half-Life", 1998, "70", DateTimeOffset.UtcNow);
+        await coordinator.SetLinkedIdentityAsync(second.Id, steam, CancellationToken.None);
+
+        var transferable = coordinator.PreviewDuplicateMerge(first.Id, second.Id);
+        Assert.True(transferable.CanMerge);
+        Assert.Equal(steam, transferable.Merged!.LinkedIdentity);
+
+        await coordinator.SetLinkedIdentityAsync(first.Id, new LinkedGameIdentity("Steam", "220", "Half-Life 2", 2004, "220", DateTimeOffset.UtcNow), CancellationToken.None);
+        var conflict = coordinator.PreviewDuplicateMerge(first.Id, second.Id);
+        Assert.False(conflict.CanMerge);
+        Assert.Contains("different confirmed provider identities", conflict.Error, StringComparison.Ordinal);
+    }
+
+    private static ArtworkReference Placeholder(ArtworkKind kind) =>
+        new(kind, $"placeholder://{kind.ToString().ToLowerInvariant()}", new MetadataProvenance("NovaLauncher", null, DateTimeOffset.UnixEpoch, false), true);
+
     [Theory]
     [InlineData(DocumentLoadStatus.NotFound, LibraryLoadState.Empty)]
     [InlineData(DocumentLoadStatus.Loaded, LibraryLoadState.Ready)]

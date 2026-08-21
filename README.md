@@ -10,13 +10,13 @@ NovaLauncher does **not** download games or ROMs, bypass DRM, replace Steam, pro
 
 Download the latest build from [GitHub Releases](https://github.com/Lightyear4509/NovaLauncher/releases). For most users, choose:
 
-- `NovaLauncher-Setup-0.2.0-beta.1-win-x64.exe` for the Windows installer.
-- `NovaLauncher-0.2.0-beta.1-win-x64-portable.zip` if you prefer a portable copy.
+- `NovaLauncher-Setup-0.3.0-beta.1-win-x64.exe` for the Windows installer.
+- `NovaLauncher-0.3.0-beta.1-win-x64-portable.zip` if you prefer a portable copy.
 
 This alpha is currently **unsigned**. Windows may display **Unknown publisher** or a Microsoft Defender SmartScreen warning. Download `SHA256SUMS.txt` from the same release and verify the installer before opening it:
 
 ```powershell
-Get-FileHash .\NovaLauncher-Setup-0.2.0-beta.1-win-x64.exe -Algorithm SHA256
+Get-FileHash .\NovaLauncher-Setup-0.3.0-beta.1-win-x64.exe -Algorithm SHA256
 ```
 
 Compare the complete result with the installer entry in `SHA256SUMS.txt`. Do not run the file if the values differ, and do not disable Windows security protections globally.
@@ -77,14 +77,23 @@ Open a game's details page to view its artwork, description, publisher informati
 
 For a manually added game:
 
-1. Select **Add cover**.
-2. Choose an image from your computer.
-3. NovaLauncher validates and copies the image into its managed local artwork storage.
-4. Select **Remove cover** to return to the placeholder without changing the original image.
+1. Use **Match game identity** to review local Steam-manifest and optional
+   SteamGridDB candidates. Nothing is linked or downloaded until you confirm a result.
+2. Choose cover, hero, logo, or background in the artwork selector.
+3. Select **Add artwork** to use your own image, or **Provider variants** to
+   review bounded choices for a confirmed identity.
+4. Use the crop percentages to create a managed preview, or select **Remove
+   artwork** to return that slot to its placeholder without changing the source image.
+5. Use **Inspect art cache** and **Clean orphan art** for bounded local cache
+   maintenance. Referenced assets and unknown filenames are never removed.
 
 Artwork is displayed with aspect-preserving scaling so covers fit Library and Home cards without stretching. In **Settings**, an optional SteamGridDB API key can enable supported artwork lookup. The key is retained only for the current running session and is not written to the library, logs, or backups.
 
-Metadata and artwork from online services may be incomplete or may not match similarly named games. Review suggested matches before accepting them.
+Metadata and artwork from online services may be incomplete or may not match
+similarly named games. Review suggested matches before accepting them. You can
+unlink or rematch a provider identity without changing the executable used to
+launch the game. A SteamGridDB-only match is not proof of Steam ownership and
+does not enable Steam achievements.
 
 ## View achievements
 
@@ -175,7 +184,7 @@ NovaLauncher is local-first:
 
 ## Current release status
 
-`v0.2.0-beta.1` is a usable Phase 2 preview, not a production-qualified release. The installer is unsigned, and real-device coverage is still incomplete for some Windows configurations, accessibility combinations such as Narrator/NVDA at 200% scaling, network interruptions, firewall policies, and save-recovery edge cases.
+`v0.3.0-beta.1` is a usable Phase 3 preview, not a production-qualified release. The installer is unsigned, and real-device coverage is still incomplete for some Windows configurations, accessibility combinations such as Narrator/NVDA at 200% scaling, network interruptions, firewall policies, and save-recovery edge cases.
 
 Please use test data or maintain independent backups while evaluating experimental save synchronization.
 

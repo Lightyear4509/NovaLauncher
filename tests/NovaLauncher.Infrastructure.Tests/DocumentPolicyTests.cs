@@ -32,6 +32,23 @@ public sealed class DocumentPolicyTests
     }
 
     [Fact]
+    public void ConfirmedProviderIdentityMustBeValidManualAndUnique()
+    {
+        var policy = new GamesDocumentPolicy();
+        var identity = new LinkedGameIdentity("Steam", "70", "Half-Life", 1998, "70", Now);
+        var first = ValidGame() with { LinkedIdentity = identity };
+        var second = ValidGame() with { LinkedIdentity = identity };
+
+        Assert.Null(policy.Validate(new GamesDocument(1, [first])));
+        Assert.Contains("unique", policy.Validate(new GamesDocument(1, [first, second])), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("manual games", policy.Validate(new GamesDocument(1, [first with { Source = "Other" }])), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("invalid", policy.Validate(new GamesDocument(1, [first with
+        {
+            LinkedIdentity = identity with { SteamAppId = "not-an-app-id" },
+        }])), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void UnsafeArtworkLocationIsRejected()
     {
         var now = DateTimeOffset.UtcNow;

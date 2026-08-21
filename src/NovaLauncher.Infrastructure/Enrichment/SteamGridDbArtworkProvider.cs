@@ -33,7 +33,7 @@ public sealed class SteamGridDbArtworkProvider : IArtworkProvider
 
     public bool CanHandle(MetadataRequest request) =>
         !string.IsNullOrWhiteSpace(_getApiKey()) &&
-        string.Equals(request.Source, "Steam", StringComparison.OrdinalIgnoreCase) &&
+        request.Source is "Steam" or "SteamGridDB" &&
         uint.TryParse(request.SourceItemId, NumberStyles.None, CultureInfo.InvariantCulture, out var appId) && appId > 0;
 
     public async Task<ArtworkProviderResult> GetArtworkAsync(MetadataRequest request, CancellationToken cancellationToken)
@@ -43,7 +43,8 @@ public sealed class SteamGridDbArtworkProvider : IArtworkProvider
             return new ArtworkProviderResult(Id, ProviderResultStatus.NoData, [], null);
         }
 
-        var uri = new Uri($"https://www.steamgriddb.com/api/v2/grids/steam/{request.SourceItemId}?dimensions=600x900&types=static");
+        var identityKind = request.Source == "SteamGridDB" ? "game" : "steam";
+        var uri = new Uri($"https://www.steamgriddb.com/api/v2/grids/{identityKind}/{request.SourceItemId}?dimensions=600x900&types=static");
         var apiKey = _getApiKey();
         var response = await _httpClient.GetAsync(
             uri,
@@ -80,7 +81,7 @@ public sealed class SteamGridDbArtworkProvider : IArtworkProvider
                 .Select(item => item.GetProperty("url").GetString())
                 .Where(static value => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
                 .Select(value => new ArtworkCandidate(ArtworkKind.Cover, value!, Id, request.SourceItemId, _timeProvider.GetUtcNow()))
-                .Take(1)
+                .Take(20)
                 .ToArray();
             return new ArtworkProviderResult(Id, candidates.Length > 0 ? ProviderResultStatus.Success : ProviderResultStatus.NoData, candidates, null);
         }

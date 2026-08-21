@@ -129,6 +129,10 @@ public sealed class LibraryCoordinator(
             return new(survivor, duplicate, null, "The records have different save-sync identities and cannot be merged automatically.");
         if (!CompatibleOptionalPath(survivor.SaveDirectory, duplicate.SaveDirectory))
             return new(survivor, duplicate, null, "The records use different save folders. Choose and verify one before merging.");
+        if (survivor.LinkedIdentity is not null && duplicate.LinkedIdentity is not null &&
+            (!string.Equals(survivor.LinkedIdentity.ProviderId, duplicate.LinkedIdentity.ProviderId, StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(survivor.LinkedIdentity.ProviderItemId, duplicate.LinkedIdentity.ProviderItemId, StringComparison.Ordinal)))
+            return new(survivor, duplicate, null, "The records have different confirmed provider identities. Unlink or rematch one before merging.");
 
         var now = timeProvider.GetUtcNow();
         var merged = survivor with
@@ -143,6 +147,7 @@ public sealed class LibraryCoordinator(
             SaveDirectory = survivor.SaveDirectory ?? duplicate.SaveDirectory,
             SaveSyncId = survivor.SaveSyncId ?? duplicate.SaveSyncId,
             SaveSyncLabel = survivor.SaveSyncLabel ?? duplicate.SaveSyncLabel,
+            LinkedIdentity = survivor.LinkedIdentity ?? duplicate.LinkedIdentity,
         };
         return new(survivor, duplicate, merged, null);
     }
@@ -209,9 +214,16 @@ public sealed class LibraryCoordinator(
         }
     }
 
-    public async Task<LibraryMutationResult> SetManualCoverAsync(
+    public Task<LibraryMutationResult> SetManualCoverAsync(
         GameId gameId,
         ArtworkReference? cover,
+        CancellationToken cancellationToken) =>
+        SetManualArtworkAsync(gameId, ArtworkKind.Cover, cover, cancellationToken);
+
+    public async Task<LibraryMutationResult> SetManualArtworkAsync(
+        GameId gameId,
+        ArtworkKind kind,
+        ArtworkReference? artwork,
         CancellationToken cancellationToken)
     {
         await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -221,18 +233,25 @@ public sealed class LibraryCoordinator(
             if (index < 0) return PersistenceFailure("The selected game no longer exists.");
             var existing = _games[index];
             if (!string.Equals(existing.Source, "Manual", StringComparison.OrdinalIgnoreCase))
-                return PersistenceFailure("Custom covers are available only for manually added games.");
+                return PersistenceFailure("Custom artwork is available only for manually added games.");
             var placeholder = new ArtworkReference(
                 ArtworkKind.Cover,
                 "placeholder://cover",
                 new MetadataProvenance("NovaLauncher", null, timeProvider.GetUtcNow(), IsManual: false),
                 IsPlaceholder: true);
             var current = existing.Artwork;
-            var updatedArtwork = new GameArtwork(
-                cover ?? placeholder,
-                current?.Hero ?? placeholder with { Kind = ArtworkKind.Hero, Location = "placeholder://hero" },
-                current?.Logo ?? placeholder with { Kind = ArtworkKind.Logo, Location = "placeholder://logo" },
-                current?.Background ?? placeholder with { Kind = ArtworkKind.Background, Location = "placeholder://background" });
+            var currentCover = current?.Cover ?? placeholder;
+            var currentHero = current?.Hero ?? placeholder with { Kind = ArtworkKind.Hero, Location = "placeholder://hero" };
+            var currentLogo = current?.Logo ?? placeholder with { Kind = ArtworkKind.Logo, Location = "placeholder://logo" };
+            var currentBackground = current?.Background ?? placeholder with { Kind = ArtworkKind.Background, Location = "placeholder://background" };
+            var replacement = artwork ?? placeholder with { Kind = kind, Location = $"placeholder://{kind.ToString().ToLowerInvariant()}" };
+            var updatedArtwork = kind switch
+            {
+                ArtworkKind.Cover => new GameArtwork(replacement, currentHero, currentLogo, currentBackground),
+                ArtworkKind.Hero => new GameArtwork(currentCover, replacement, currentLogo, currentBackground),
+                ArtworkKind.Logo => new GameArtwork(currentCover, currentHero, replacement, currentBackground),
+                _ => new GameArtwork(currentCover, currentHero, currentLogo, replacement),
+            };
             var updated = existing with { Artwork = updatedArtwork, UpdatedAtUtc = timeProvider.GetUtcNow() };
             return await SaveReplacementAsync(index, updated, cancellationToken).ConfigureAwait(false);
         }
@@ -298,6 +317,91 @@ public sealed class LibraryCoordinator(
             return await SaveReplacementAsync(
                 index,
                 existing with { SaveSyncId = saveSyncId, SaveSyncLabel = normalizedLabel, UpdatedAtUtc = timeProvider.GetUtcNow() },
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally { _mutationGate.Release(); }
+    }
+
+    public async Task<LibraryMutationResult> SetManualMetadataAsync(
+        GameId gameId,
+        string? description,
+        IReadOnlyList<string>? genres,
+        IReadOnlyList<string>? developers,
+        IReadOnlyList<string>? publishers,
+        DateOnly? releaseDate,
+        CancellationToken cancellationToken)
+    {
+        if (description is { Length: > 10_000 } ||
+            !ValidManualList(genres) || !ValidManualList(developers) || !ValidManualList(publishers))
+            return PersistenceFailure("Manual metadata exceeds the supported bounds.");
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var index = FindIndex(gameId);
+            if (index < 0) return PersistenceFailure("The selected game no longer exists.");
+            var existing = _games[index];
+            if (!string.Equals(existing.Source, "Manual", StringComparison.OrdinalIgnoreCase))
+                return PersistenceFailure("Manual metadata overrides are available only for manually added games.");
+            var provenance = new MetadataProvenance("Manual", null, timeProvider.GetUtcNow(), IsManual: true);
+            var updatedMetadata = existing.Metadata with
+            {
+                Description = string.IsNullOrWhiteSpace(description) ? null : new(description.Trim(), provenance),
+                Genres = ValueOrNull(genres, provenance),
+                Developers = ValueOrNull(developers, provenance),
+                Publishers = ValueOrNull(publishers, provenance),
+                ReleaseDate = releaseDate is null ? null : new(releaseDate.Value, provenance),
+            };
+            return await SaveReplacementAsync(index, existing with { Metadata = updatedMetadata, UpdatedAtUtc = timeProvider.GetUtcNow() }, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _mutationGate.Release(); }
+    }
+
+    public async Task<LibraryMutationResult> ClearManualMetadataProtectionAsync(GameId gameId, CancellationToken cancellationToken)
+    {
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var index = FindIndex(gameId);
+            if (index < 0) return PersistenceFailure("The selected game no longer exists.");
+            var existing = _games[index];
+            var metadata = existing.Metadata;
+            var lastKnown = new MetadataProvenance("NovaLauncherLastKnown", null, timeProvider.GetUtcNow(), IsManual: false);
+            var updated = metadata with
+            {
+                Description = ReleaseManualProtection(metadata.Description, lastKnown),
+                Genres = ReleaseManualProtection(metadata.Genres, lastKnown),
+                Developers = ReleaseManualProtection(metadata.Developers, lastKnown),
+                Publishers = ReleaseManualProtection(metadata.Publishers, lastKnown),
+                ReleaseDate = ReleaseManualProtection(metadata.ReleaseDate, lastKnown),
+                Rating = ReleaseManualProtection(metadata.Rating, lastKnown),
+            };
+            return await SaveReplacementAsync(index, existing with { Metadata = updated, UpdatedAtUtc = timeProvider.GetUtcNow() }, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _mutationGate.Release(); }
+    }
+
+    public async Task<LibraryMutationResult> SetLinkedIdentityAsync(
+        GameId gameId,
+        LinkedGameIdentity? identity,
+        CancellationToken cancellationToken)
+    {
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var index = FindIndex(gameId);
+            if (index < 0) return PersistenceFailure("The selected game no longer exists.");
+            var existing = _games[index];
+            if (!string.Equals(existing.Source, "Manual", StringComparison.OrdinalIgnoreCase))
+                return PersistenceFailure("Provider linking is available only for manually added games.");
+            var error = ValidateLinkedIdentity(identity);
+            if (error is not null) return PersistenceFailure(error);
+            if (identity is not null && _games.Any(game => game.Id != gameId &&
+                string.Equals(game.LinkedIdentity?.ProviderId, identity.ProviderId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(game.LinkedIdentity?.ProviderItemId, identity.ProviderItemId, StringComparison.Ordinal)))
+                return PersistenceFailure("That provider identity is already linked to another local game.");
+            return await SaveReplacementAsync(
+                index,
+                existing with { LinkedIdentity = identity, UpdatedAtUtc = timeProvider.GetUtcNow() },
                 cancellationToken).ConfigureAwait(false);
         }
         finally { _mutationGate.Release(); }
@@ -649,6 +753,15 @@ public sealed class LibraryCoordinator(
     private static bool Contains(IReadOnlyList<string>? values, string token) =>
         values?.Any(value => value.Contains(token, StringComparison.OrdinalIgnoreCase)) == true;
 
+    private static bool ValidManualList(IReadOnlyList<string>? values) =>
+        values is null || values.Count <= 50 && values.All(static value => !string.IsNullOrWhiteSpace(value) && value.Length <= 200);
+
+    private static MetadataValue<IReadOnlyList<string>>? ValueOrNull(IReadOnlyList<string>? values, MetadataProvenance provenance) =>
+        values is null || values.Count == 0 ? null : new(values.Select(static value => value.Trim()).ToArray(), provenance);
+
+    private static MetadataValue<T>? ReleaseManualProtection<T>(MetadataValue<T>? value, MetadataProvenance lastKnown) =>
+        value?.Provenance.IsManual == true ? value with { Provenance = lastKnown } : value;
+
     private static string? ValidateDuplicateIdentity(LibraryItem survivor, LibraryItem duplicate)
     {
         if (!string.Equals(survivor.Source, duplicate.Source, StringComparison.OrdinalIgnoreCase))
@@ -660,6 +773,20 @@ public sealed class LibraryCoordinator(
         return string.Equals(NormalizePath(survivor.LaunchTarget.Target), NormalizePath(duplicate.LaunchTarget.Target), StringComparison.OrdinalIgnoreCase)
             ? null
             : "Manual records must resolve to the same executable target.";
+    }
+
+    private static string? ValidateLinkedIdentity(LinkedGameIdentity? identity)
+    {
+        if (identity is null) return null;
+        if (identity.ProviderId is not ("Steam" or "SteamGridDB") ||
+            string.IsNullOrWhiteSpace(identity.ProviderItemId) || identity.ProviderItemId.Length > 128 ||
+            string.IsNullOrWhiteSpace(identity.DisplayName) || identity.DisplayName.Length > 500 ||
+            identity.ReleaseYear is < 1970 or > 2200)
+            return "The linked provider identity is invalid.";
+        if (identity.SteamAppId is { } appId &&
+            (!uint.TryParse(appId, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed) || parsed == 0))
+            return "The confirmed Steam App ID is invalid.";
+        return null;
     }
 
     private static bool CompatibleOptionalPath(string? first, string? second) =>

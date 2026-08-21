@@ -118,6 +118,48 @@ public sealed partial class MainWindow : Window
         await ExecuteAsync(() => ViewModel.Workspace.RefreshSelectedMetadataAsync(_lifetimeCancellation.Token));
     }
 
+    private async void OnSearchGameIdentity(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.SearchSelectedGameIdentityAsync(_lifetimeCancellation.Token));
+
+    private void OnRejectGameIdentityMatches(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.RejectIdentityCandidates();
+
+    private async void OnUnlinkGameIdentity(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.UnlinkSelectedGameIdentityAsync(_lifetimeCancellation.Token));
+
+    private async void OnConfirmGameIdentity(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: NovaLauncher.Application.Enrichment.GameIdentityCandidate candidate }) return;
+        await ExecuteAsync(() => ViewModel.Workspace!.ConfirmSelectedGameIdentityAsync(candidate, _lifetimeCancellation.Token));
+    }
+
+    private async void OnSaveManualMetadata(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.SaveManualMetadataAsync(_lifetimeCancellation.Token));
+
+    private async void OnRestoreProviderMetadata(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.RestoreProviderMetadataAsync(_lifetimeCancellation.Token));
+
+    private async void OnPreviewArtworkVariants(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.PreviewArtworkVariantsAsync(_lifetimeCancellation.Token));
+
+    private async void OnApplyArtworkVariant(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: NovaLauncher.Application.Enrichment.ArtworkCandidate candidate }) return;
+        await ExecuteAsync(() => ViewModel.Workspace!.ApplyArtworkVariantAsync(candidate, _lifetimeCancellation.Token));
+        OnGameSelectionChanged(null, null!);
+    }
+
+    private async void OnCropSelectedArtwork(object? sender, RoutedEventArgs e)
+    {
+        await ExecuteAsync(() => ViewModel.Workspace!.CropSelectedArtworkAsync(_lifetimeCancellation.Token));
+        OnGameSelectionChanged(null, null!);
+    }
+
+    private async void OnInspectArtworkCache(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.InspectArtworkCacheAsync(_lifetimeCancellation.Token));
+
+    private async void OnCleanupArtworkCache(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.CleanupArtworkCacheAsync(_lifetimeCancellation.Token));
+
     private void OnReviewDuplicate(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: NovaLauncher.Application.Library.DuplicateReviewItem review } button) return;
@@ -279,7 +321,8 @@ public sealed partial class MainWindow : Window
         _selectedArtwork?.Dispose();
         _selectedArtwork = null;
         SelectedCover.Source = null;
-        var location = ViewModel.Workspace?.SelectedGame?.Artwork?.Cover.Location;
+        var artwork = ViewModel.Workspace?.SelectedGame?.Artwork;
+        var location = artwork?.Hero.IsPlaceholder == false ? artwork.Hero.Location : artwork?.Cover.Location;
         var resolver = Program.Services.GetRequiredService<ManagedArtworkMaterializer>();
         if (location is null || !resolver.TryResolve(location, out var path)) return;
 
@@ -331,7 +374,7 @@ public sealed partial class MainWindow : Window
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Choose game cover artwork",
+            Title = $"Choose game {ViewModel.Workspace!.SelectedArtworkKind.ToLowerInvariant()} artwork",
             AllowMultiple = false,
             FileTypeFilter =
             [

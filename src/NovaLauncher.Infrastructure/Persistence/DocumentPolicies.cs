@@ -17,6 +17,7 @@ public sealed class GamesDocumentPolicy : IDocumentPolicy<GamesDocument>
 
         var ids = new HashSet<Guid>();
         var saveSyncIds = new HashSet<Guid>();
+        var linkedIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var game in document.Games)
         {
             if (game.Id.Value == Guid.Empty)
@@ -68,6 +69,24 @@ public sealed class GamesDocumentPolicy : IDocumentPolicy<GamesDocument>
             if (game.SourceItemId is { Length: > 128 } || game.ImportedName is { Length: > 500 })
             {
                 return "Game source identity or imported name exceeds its length limit.";
+            }
+
+            if (game.LinkedIdentity is { } linked &&
+                (linked.ProviderId is not ("Steam" or "SteamGridDB") ||
+                 string.IsNullOrWhiteSpace(linked.ProviderItemId) || linked.ProviderItemId.Length > 128 ||
+                 string.IsNullOrWhiteSpace(linked.DisplayName) || linked.DisplayName.Length > 500 ||
+                 linked.ReleaseYear is < 1970 or > 2200 ||
+                 linked.ConfirmedAtUtc > DateTimeOffset.UtcNow.AddDays(1) ||
+                 linked.SteamAppId is { } linkedAppId &&
+                 (!uint.TryParse(linkedAppId, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsedAppId) || parsedAppId == 0)))
+            {
+                return "A confirmed provider identity is invalid.";
+            }
+            if (game.LinkedIdentity is { } confirmed &&
+                (!string.Equals(game.Source, "Manual", StringComparison.OrdinalIgnoreCase) ||
+                 !linkedIdentities.Add($"{confirmed.ProviderId}:{confirmed.ProviderItemId}")))
+            {
+                return "Confirmed provider identities must belong to manual games and be unique within the local library.";
             }
 
             if (string.Equals(game.Source, "Steam", StringComparison.OrdinalIgnoreCase) &&

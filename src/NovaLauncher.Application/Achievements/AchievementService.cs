@@ -34,7 +34,9 @@ public sealed class AchievementService(
                 return new(AchievementRefreshStatus.Success, cached with { IsStale = false }, false, null);
             }
 
-            var request = new AchievementRequest(game.Id, game.Source, game.SourceItemId);
+            var request = game.LinkedIdentity?.SteamAppId is { } linkedSteamAppId
+                ? new AchievementRequest(game.Id, "Steam", linkedSteamAppId)
+                : new AchievementRequest(game.Id, game.Source, game.SourceItemId);
             var provider = providers.FirstOrDefault(item => item.IsConfigured && item.CanHandle(request));
             if (provider is null)
             {

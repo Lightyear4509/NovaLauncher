@@ -104,6 +104,31 @@ public sealed class ManagedArtworkMaterializerTests : IDisposable
     }
 
     [Fact]
+    public async Task CacheInspectionAndCleanupRetainReferencedAssetsAndRemoveOnlyOrphans()
+    {
+        var materializer = Create(CreatePng(), "image/png");
+        var retained = await materializer.MaterializeAsync(GameId.New(), [Candidate()], CancellationToken.None);
+        var orphan = await materializer.MaterializeAsync(GameId.New(), [Candidate()], CancellationToken.None);
+        var unknown = Path.Combine(_root, "do-not-delete.txt");
+        await File.WriteAllTextAsync(unknown, "not a generated artwork file");
+
+        var inspected = await materializer.InspectCacheAsync(CancellationToken.None);
+        Assert.Equal(3, inspected.FileCount);
+        Assert.True(inspected.TotalBytes > 0);
+
+        var cleanup = await materializer.CleanupCacheAsync(
+            new HashSet<string>([retained.Candidates[0].Location], StringComparer.OrdinalIgnoreCase), CancellationToken.None);
+
+        Assert.Equal(1, cleanup.RemovedCount);
+        Assert.True(materializer.TryResolve(retained.Candidates[0].Location, out var retainedPath));
+        Assert.True(File.Exists(retainedPath));
+        Assert.True(materializer.TryResolve(orphan.Candidates[0].Location, out var orphanPath));
+        Assert.False(File.Exists(orphanPath));
+        Assert.True(File.Exists(unknown));
+        Assert.Contains("skipped", cleanup.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ManualCoverIsValidatedCopiedToManagedStorageAndRemovable()
     {
         Directory.CreateDirectory(_root);
@@ -122,6 +147,20 @@ public sealed class ManagedArtworkMaterializerTests : IDisposable
         await materializer.DeleteManagedAsync(result.Cover.Location, CancellationToken.None);
         Assert.False(File.Exists(managedPath));
         Assert.True(File.Exists(source));
+
+        var hero = await materializer.ImportAsync(new GameId(Guid.NewGuid()), ArtworkKind.Hero, source, CancellationToken.None);
+        Assert.Equal(ArtworkKind.Hero, hero.Cover!.Kind);
+        Assert.Contains("-hero-", hero.Cover.Location, StringComparison.Ordinal);
+
+        var cropped = await materializer.CropAsync(
+            new GameId(Guid.NewGuid()), hero.Cover, 0.25, 0.25, 0.5, 0.5, CancellationToken.None);
+        Assert.Null(cropped.Error);
+        Assert.Equal(ArtworkKind.Hero, cropped.Cover!.Kind);
+        Assert.True(cropped.Cover.Provenance.IsManual);
+
+        var rejected = await materializer.CropAsync(
+            new GameId(Guid.NewGuid()), hero.Cover, 0.75, 0.75, 0.5, 0.5, CancellationToken.None);
+        Assert.Contains("bounds", rejected.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     public void Dispose()
