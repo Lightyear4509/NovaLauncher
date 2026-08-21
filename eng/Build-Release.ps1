@@ -35,14 +35,14 @@ Copy-Item (Join-Path $root 'LICENSE') $publish -Force
 Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $publish -Force
 Copy-Item (Join-Path $root 'installer\UNSIGNED-PREVIEW.txt') $publish -Force
 
-$portable = Join-Path $release 'NovaLauncher-0.4.0-beta.1-win-x64-portable.zip'
+$portable = Join-Path $release 'NovaLauncher-0.5.0-experimental.1-win-x64-portable.zip'
 if (Test-Path $portable) { Remove-Item -LiteralPath $portable -Force }
 Compress-Archive -Path (Join-Path $publish '*') -DestinationPath $portable -CompressionLevel Optimal
 
 & $iscc (Join-Path $root 'installer\NovaLauncher.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 
-& (Join-Path $PSScriptRoot 'New-Sbom.ps1') -OutputPath (Join-Path $release 'NovaLauncher-0.4.0-beta.1.cdx.json')
+& (Join-Path $PSScriptRoot 'New-Sbom.ps1') -OutputPath (Join-Path $release 'NovaLauncher-0.5.0-experimental.1.cdx.json')
 $artifacts = Get-ChildItem -LiteralPath $release -File | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object Name
 $lines = foreach ($artifact in $artifacts) {
     $hash = (Get-FileHash -LiteralPath $artifact.FullName -Algorithm SHA256).Hash.ToLowerInvariant()

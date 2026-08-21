@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using NovaLauncher.Application.SaveSync;
+using NovaLauncher.Application.GameTransfer;
 using NovaLauncher.Domain.Library;
 using NovaLauncher.Domain.SaveSync;
 using NovaLauncher.Infrastructure.SaveSync;
@@ -90,6 +91,29 @@ public sealed class TailscaleTcpTransportTests
         Assert.Equal(strongSecret, result.Secret);
     }
 
+    [Fact]
+    public async Task AuthenticatedPeerCanListAuthorizedOfferAndPullBoundedChunk()
+    {
+        var portA = FreePort(); var portB = FreePort(); while (portB == portA) portB = FreePort();
+        var secret = RandomNumberGenerator.GetBytes(32); var idA = Guid.NewGuid(); var idB = Guid.NewGuid();
+        var credentialA = new Secret(secret); var credentialB = new Secret(secret);
+        var settingsA = Settings(idA, "A", idB, portB, credentialA); var settingsB = Settings(idB, "B", idA, portA, credentialB);
+        await using var a = new TailscaleTcpTransport(() => settingsA, credentialA, IPAddress.Loopback, portA, credentialA);
+        await using var b = new TailscaleTcpTransport(() => settingsB, credentialB, IPAddress.Loopback, portB, credentialB);
+        var bytes = System.Text.Encoding.UTF8.GetBytes("authorized-package");
+        var file = new GameTransferFile("game.exe", bytes.Length, Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), DateTimeOffset.UtcNow);
+        var manifest = new GameTransferManifest(Guid.NewGuid(), new GameId(Guid.NewGuid()), "Package", idB, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddHours(1), [file], bytes.Length);
+        b.AttachGameTransferEndpoint(new GameEndpoint(idA, manifest, bytes));
+        await a.StartAsync(new Endpoint(idB), CancellationToken.None); await b.StartAsync(new Endpoint(idA), CancellationToken.None);
+
+        var offers = await a.ListGameTransferOffersAsync(settingsA.EffectiveTrustedPeers[0], CancellationToken.None);
+        var chunk = await a.PullGameTransferChunkAsync(settingsA.EffectiveTrustedPeers[0], manifest.OfferId, file.RelativePath, 2, 5, CancellationToken.None);
+
+        Assert.Equal(manifest.OfferId, Assert.Single(offers).OfferId);
+        Assert.True(chunk.Success, chunk.Error);
+        Assert.Equal(bytes.AsSpan(2, 5).ToArray(), chunk.Bytes);
+    }
+
     private static SaveSnapshotPayload Payload()
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes("secret-save");
@@ -123,5 +147,17 @@ public sealed class TailscaleTcpTransportTests
         public Task<PairingRedemptionResult> RedeemInvitationAsync(string code, Guid deviceId, CancellationToken token) => Task.FromResult(Redeemer?.Invoke(code, deviceId) ?? new PairingRedemptionResult(false, null, null, "Not configured."));
         public Task<TransportResult> ReceivePushAsync(SaveSnapshotPayload snapshot, CancellationToken token) { Received = snapshot; return Task.FromResult(new TransportResult(true, false, null, null)); }
         public Task<TransportResult> ServePullAsync(GameId gameId, Guid? knownHead, CancellationToken token) => Task.FromResult(new TransportResult(true, false, null, null));
+    }
+
+    private sealed class GameEndpoint(Guid expected, GameTransferManifest manifest, byte[] bytes) : IPeerGameTransferEndpoint
+    {
+        public Task<IReadOnlyList<GameTransferManifest>> ListAuthorizedGameTransfersAsync(Guid requestingDeviceId, CancellationToken token) =>
+            Task.FromResult<IReadOnlyList<GameTransferManifest>>(requestingDeviceId == expected ? [manifest] : []);
+        public Task<GameTransferChunkResult> ServeGameTransferChunkAsync(Guid requestingDeviceId, Guid offerId, string path, long offset, int maximum, CancellationToken token)
+        {
+            if (requestingDeviceId != expected || offerId != manifest.OfferId) return Task.FromResult(new GameTransferChunkResult(false, null, false, "Unauthorized"));
+            var count = Math.Min(maximum, bytes.Length - (int)offset);
+            return Task.FromResult(new GameTransferChunkResult(true, bytes.AsSpan((int)offset, count).ToArray(), offset + count == bytes.Length, null));
+        }
     }
 }

@@ -284,6 +284,34 @@ public sealed partial class MainWindow : Window
     private async void OnSyncSelectedGameNow(object? sender, RoutedEventArgs e) =>
         await ExecuteAsync(() => ViewModel.Workspace!.SyncSelectedGameNowAsync(_lifetimeCancellation.Token));
 
+    private async void OnChooseGameTransferSource(object? sender, RoutedEventArgs e)
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose the authorized manual game folder", AllowMultiple = false });
+        var path = folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path)) ViewModel.Workspace!.GameTransferSourceFolder = path;
+    }
+
+    private async void OnChooseGameTransferDestination(object? sender, RoutedEventArgs e)
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose an empty destination folder", AllowMultiple = false });
+        var path = folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path)) ViewModel.Workspace!.GameTransferDestination = path;
+    }
+
+    private async void OnPreviewGameTransfer(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.PreviewSelectedGameTransferAsync(_lifetimeCancellation.Token));
+
+    private async void OnAuthorizeGameTransfer(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.AuthorizeSelectedGameTransferAsync(_lifetimeCancellation.Token));
+
+    private async void OnRefreshGameTransferOffers(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.RefreshPeerGameTransferOffersAsync(_lifetimeCancellation.Token));
+
+    private async void OnDownloadGameTransfer(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => ViewModel.Workspace!.DownloadSelectedGameTransferAsync(_lifetimeCancellation.Token));
+
+    private void OnPauseGameTransfer(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.PauseGameTransfer();
+
     private void OnDismissInitialSaveUpload(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.DismissInitialSaveUploadPrompt();
 
     private async void OnGenerateSaveSyncLink(object? sender, RoutedEventArgs e) =>

@@ -10,13 +10,13 @@ NovaLauncher does **not** download games or ROMs, bypass DRM, replace Steam, pro
 
 Download the latest build from [GitHub Releases](https://github.com/Lightyear4509/NovaLauncher/releases). For most users, choose:
 
-- `NovaLauncher-Setup-0.4.0-beta.1-win-x64.exe` for the Windows installer.
-- `NovaLauncher-0.4.0-beta.1-win-x64-portable.zip` if you prefer a portable copy.
+- `NovaLauncher-Setup-0.5.0-experimental.1-win-x64.exe` for the Windows installer.
+- `NovaLauncher-0.5.0-experimental.1-win-x64-portable.zip` if you prefer a portable copy.
 
 This alpha is currently **unsigned**. Windows may display **Unknown publisher** or a Microsoft Defender SmartScreen warning. Download `SHA256SUMS.txt` from the same release and verify the installer before opening it:
 
 ```powershell
-Get-FileHash .\NovaLauncher-Setup-0.4.0-beta.1-win-x64.exe -Algorithm SHA256
+Get-FileHash .\NovaLauncher-Setup-0.5.0-experimental.1-win-x64.exe -Algorithm SHA256
 ```
 
 Compare the complete result with the installer entry in `SHA256SUMS.txt`. Do not run the file if the values differ, and do not disable Windows security protections globally.
@@ -184,7 +184,7 @@ NovaLauncher is local-first:
 
 ## Current release status
 
-`v0.4.0-beta.1` is a Phase 4 prerelease with bounded multi-peer private save synchronization, independently revocable peer credentials, conflict-safe fan-out, and local snapshot/restore history. It is not production-qualified: the installer is unsigned, and physical-device coverage remains incomplete for Narrator/NVDA at 200% scaling, sleep/hibernation, network switching, firewall policies, disk-full/power-loss recovery, resumable chunk streaming, and independent security review.
+`v0.5.0-experimental.1` adds explicit peer transfer of user-authorized manual DRM-free game folders. It rejects Steam/store-managed roots, uses authenticated bounded chunks, resumes verified staging, checks every SHA-256 hash, invokes Windows Security where available, and never launches received executables. This unsigned experimental prerelease is not production- or legal/security-qualified; physical multi-device interruption, disk exhaustion, firewall, accessibility, and independent review remain open.
 
 Please use test data or maintain independent backups while evaluating experimental save synchronization.
 

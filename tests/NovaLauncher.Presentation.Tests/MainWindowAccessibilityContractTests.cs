@@ -56,7 +56,15 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("Generate 24-hour invitation", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Copy six-digit invitation code\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Paste six-digit invitation code\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Full-game transfer is not enabled", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Preview bounded game transfer manifest\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Trusted game transfer recipient\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Attest game copy rights\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Authorize reviewed game transfer to selected peer\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Authorized peer game transfer offers\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Download or resume verified peer game transfer\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Pause active game transfer\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Peer game transfer byte progress\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Local peer game transfer audit history\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Current save transfer progress\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Create shared save identity for selected game\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Apply shared save identity to selected game\"", xaml, StringComparison.Ordinal);

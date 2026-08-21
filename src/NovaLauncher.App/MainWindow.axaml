@@ -11,6 +11,7 @@
     xmlns:themes="using:NovaLauncher.Application.Themes"
     xmlns:enrichment="using:NovaLauncher.Application.Enrichment"
     xmlns:saves="using:NovaLauncher.Application.SaveSync"
+    xmlns:transfers="using:NovaLauncher.Application.GameTransfer"
     xmlns:syncDomain="using:NovaLauncher.Domain.SaveSync"
     xmlns:vm="using:NovaLauncher.Application"
     x:DataType="vm:MainWindowViewModel"
@@ -500,7 +501,7 @@
       <ScrollViewer Grid.Column="1" IsVisible="{Binding Workspace.IsSavesPage}">
         <StackPanel Margin="34,30" Spacing="20" MaxWidth="820" HorizontalAlignment="Left">
           <TextBlock Text="Downloads &amp; Saves" Classes="page-title" />
-          <TextBlock Text="Track encrypted cross-device save downloads and uploads. Full-game transfer is not enabled in this build." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
+          <TextBlock Text="Track encrypted cross-device saves and explicitly authorized experimental peer game transfers." Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
           <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">
             <StackPanel Spacing="10">
               <TextBlock Text="Current transfer" FontSize="21" FontWeight="SemiBold" />
@@ -528,6 +529,48 @@
                 <Button Content="Retry queued uploads" Click="OnRetryPendingSaveUploads" AutomationProperties.Name="Retry queued save uploads to paired device" />
                 <Button Content="Refresh activity" Click="OnRefreshSaveSyncActivity" AutomationProperties.Name="Refresh save transfer activity" />
               </WrapPanel>
+            </StackPanel>
+          </Border>
+          <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">
+            <StackPanel Spacing="12">
+              <TextBlock Text="Private game transfer (experimental)" FontSize="21" FontWeight="SemiBold" />
+              <TextBlock Text="For a manually added, DRM-free game folder you are authorized to copy. Steam and store-managed folders are rejected. Received executables are never launched automatically." TextWrapping="Wrap" Foreground="{DynamicResource ThemeMuted}" />
+              <TextBlock Text="Offer a manual game" FontWeight="SemiBold" />
+              <TextBox Text="{Binding Workspace.GameTransferSourceFolder}" PlaceholderText="Source game folder" AutomationProperties.Name="Authorized manual game source folder" />
+              <WrapPanel ItemSpacing="8">
+                <Button Content="Choose source folder" Click="OnChooseGameTransferSource" AutomationProperties.Name="Choose manual game transfer source folder" />
+                <Button Content="Preview manifest" Click="OnPreviewGameTransfer" AutomationProperties.Name="Preview bounded game transfer manifest" />
+              </WrapPanel>
+              <TextBlock Text="{Binding Workspace.GameTransferPreview.Files.Count, StringFormat='Preview: {0} files'}" IsVisible="{Binding Workspace.HasGameTransferPreview}" />
+              <TextBlock Text="{Binding Workspace.GameTransferPreview.TotalBytes, StringFormat='Total: {0:N0} bytes'}" IsVisible="{Binding Workspace.HasGameTransferPreview}" />
+              <ComboBox ItemsSource="{Binding Workspace.TrustedSaveSyncPeers}" SelectedItem="{Binding Workspace.SelectedTrustedPeer}" PlaceholderText="Choose one trusted recipient" AutomationProperties.Name="Trusted game transfer recipient">
+                <ComboBox.ItemTemplate><DataTemplate x:DataType="syncDomain:TrustedSaveSyncPeer"><TextBlock Text="{Binding DisplayName}" /></DataTemplate></ComboBox.ItemTemplate>
+              </ComboBox>
+              <CheckBox Content="I confirm I am authorized to copy and transfer this DRM-free game folder" IsChecked="{Binding Workspace.GameTransferRightsAttested}" Foreground="{DynamicResource ThemeText}" AutomationProperties.Name="Attest game copy rights" />
+              <Button Content="Authorize 24-hour offer" Click="OnAuthorizeGameTransfer" IsEnabled="{Binding Workspace.HasGameTransferPreview}" HorizontalAlignment="Left" AutomationProperties.Name="Authorize reviewed game transfer to selected peer" />
+              <TextBlock Text="Receive an authorized offer" FontWeight="SemiBold" Margin="0,8,0,0" />
+              <Button Content="Refresh offers" Click="OnRefreshGameTransferOffers" HorizontalAlignment="Left" AutomationProperties.Name="Refresh authorized peer game transfer offers" />
+              <ListBox ItemsSource="{Binding Workspace.PeerGameTransferOffers}" SelectedItem="{Binding Workspace.SelectedGameTransferOffer}" MaxHeight="180" AutomationProperties.Name="Authorized peer game transfer offers">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="transfers:PeerGameTransferOffer">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="4">
+                      <StackPanel><TextBlock Text="{Binding Manifest.PackageName}" FontWeight="SemiBold" /><TextBlock Text="{Binding Peer.DisplayName}" Foreground="{DynamicResource ThemeMuted}" /></StackPanel>
+                      <TextBlock Grid.Column="1" Text="{Binding Manifest.TotalBytes, StringFormat='{}{0:N0} bytes'}" VerticalAlignment="Center" />
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <TextBox Text="{Binding Workspace.GameTransferDestination}" PlaceholderText="Empty destination folder" AutomationProperties.Name="Game transfer destination folder" />
+              <WrapPanel ItemSpacing="8">
+                <Button Content="Choose destination" Click="OnChooseGameTransferDestination" AutomationProperties.Name="Choose empty game transfer destination" />
+                <Button Content="Download or resume" Click="OnDownloadGameTransfer" AutomationProperties.Name="Download or resume verified peer game transfer" />
+                <Button Content="Pause" Click="OnPauseGameTransfer" IsEnabled="{Binding Workspace.IsGameTransferActive}" AutomationProperties.Name="Pause active game transfer" />
+              </WrapPanel>
+              <ProgressBar Minimum="0" Maximum="100" Value="{Binding Workspace.GameTransferProgress}" Height="8" AutomationProperties.Name="Peer game transfer byte progress" />
+              <TextBlock Text="{Binding Workspace.GameTransferStatus}" TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding Workspace.GameTransferHistory}" AutomationProperties.Name="Local peer game transfer audit history">
+                <ItemsControl.ItemTemplate><DataTemplate x:DataType="transfers:GameTransferAuditItem"><TextBlock Text="{Binding Outcome}" TextWrapping="Wrap" /></DataTemplate></ItemsControl.ItemTemplate>
+              </ItemsControl>
             </StackPanel>
           </Border>
           <Border Background="{DynamicResource ThemeElevated}" CornerRadius="16" Padding="24">
