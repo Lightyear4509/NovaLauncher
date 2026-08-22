@@ -53,18 +53,18 @@ if ($LASTEXITCODE -ne 0) { throw 'Application Authenticode signing failed.' }
 $appSignature = Get-AuthenticodeSignature (Join-Path $publish 'NovaLauncher.App.exe')
 if ($appSignature.Status -ne 'Valid') { throw "Signed application verification failed: $($appSignature.Status)." }
 
-$portable = Join-Path $release 'NovaLauncher-1.2.1-win-x64-portable.zip'
+$portable = Join-Path $release 'NovaLauncher-1.2.2-win-x64-portable.zip'
 if (Test-Path $portable) { Remove-Item -LiteralPath $portable -Force }
 Compress-Archive -Path (Join-Path $publish '*') -DestinationPath $portable -CompressionLevel Optimal
 
 & $iscc "/DArtifactRoot=$publish" "/DInstallerOutputDir=$release" (Join-Path $root 'installer\NovaLauncher.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
-& $signTool sign /fd SHA256 /td SHA256 /tr 'http://timestamp.digicert.com' /f $SigningCertificatePath /p $SigningCertificatePassword (Join-Path $release 'NovaLauncher-Setup-1.2.1-win-x64.exe')
+& $signTool sign /fd SHA256 /td SHA256 /tr 'http://timestamp.digicert.com' /f $SigningCertificatePath /p $SigningCertificatePassword (Join-Path $release 'NovaLauncher-Setup-1.2.2-win-x64.exe')
 if ($LASTEXITCODE -ne 0) { throw 'Installer Authenticode signing failed.' }
-$installerSignature = Get-AuthenticodeSignature (Join-Path $release 'NovaLauncher-Setup-1.2.1-win-x64.exe')
+$installerSignature = Get-AuthenticodeSignature (Join-Path $release 'NovaLauncher-Setup-1.2.2-win-x64.exe')
 if ($installerSignature.Status -ne 'Valid') { throw "Signed installer verification failed: $($installerSignature.Status)." }
 
-& (Join-Path $PSScriptRoot 'New-Sbom.ps1') -OutputPath (Join-Path $release 'NovaLauncher-1.2.1.cdx.json')
+& (Join-Path $PSScriptRoot 'New-Sbom.ps1') -OutputPath (Join-Path $release 'NovaLauncher-1.2.2.cdx.json')
 $artifacts = Get-ChildItem -LiteralPath $release -File | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object Name
 $lines = foreach ($artifact in $artifacts) {
     $hash = (Get-FileHash -LiteralPath $artifact.FullName -Algorithm SHA256).Hash.ToLowerInvariant()

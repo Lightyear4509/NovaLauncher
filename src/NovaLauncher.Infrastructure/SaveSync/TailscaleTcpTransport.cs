@@ -397,9 +397,12 @@ public sealed class TailscaleTcpTransport(
                         foreach (var old in _seenRequests.Where(item => now - item.Value > 120).Select(static item => item.Key)) _seenRequests.TryRemove(old, out _);
                     if (request.RequestId == Guid.Empty || !_seenRequests.TryAdd(request.RequestId, now))
                         result = new(false, false, null, "A replayed peer request was rejected.");
-                    else if (_endpoint is null || Math.Abs(now - request.Timestamp) > 120 ||
-                        !await _endpoint.AuthorizePeerAsync(request.DeviceId, cancellationToken).ConfigureAwait(false))
-                        result = new(false, false, null, "The request identity or timestamp was rejected.");
+                    else if (_endpoint is null)
+                        result = new(false, false, null, "The peer service is not ready to authorize requests.");
+                    else if (Math.Abs(now - request.Timestamp) > 120)
+                        result = new(false, false, null, "The device clocks differ by more than two minutes. Enable automatic date, time, and time-zone synchronization on both devices.");
+                    else if (!await _endpoint.AuthorizePeerAsync(request.DeviceId, cancellationToken).ConfigureAwait(false))
+                        result = new(false, false, null, "This device ID is not an active trusted peer on the receiving device. Resume it in Trusted devices or create a fresh pairing.");
                     else if (request.Operation == "Pull")
                         result = await _endpoint.ServePullAsync(request.GameId, request.KnownHead, cancellationToken).ConfigureAwait(false);
                     else if (request.Operation == "Push" && request.Snapshot is not null)

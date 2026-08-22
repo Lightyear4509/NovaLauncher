@@ -73,6 +73,35 @@ public sealed class SaveSyncCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task EveryActiveTrustedPeerIsAuthorizedBeyondLegacySinglePeerPin()
+    {
+        var firstPeerId = Guid.NewGuid();
+        var secondPeerId = Guid.NewGuid();
+        var initial = SaveSyncDocument.CreateDefault();
+        initial = initial with
+        {
+            Settings = initial.Settings with
+            {
+                PeerDeviceId = firstPeerId,
+                PeerAddress = "100.64.0.2",
+                TrustedPeers =
+                [
+                    new(firstPeerId, "First", "100.64.0.2", "first", TrustedPeerState.Active, DateTimeOffset.UtcNow),
+                    new(secondPeerId, "Second", "100.64.0.3", "second", TrustedPeerState.Active, DateTimeOffset.UtcNow),
+                ],
+            },
+        };
+        var service = new SaveSyncCoordinator(
+            new Store(initial), new FakeTransport(), new Secret(), TimeProvider.System,
+            Path.Combine(_root, "multi-peer-authorization"), TimeSpan.Zero, new PeerCredentials());
+        await service.InitializeAsync(CancellationToken.None);
+
+        Assert.True(await service.AuthorizePeerAsync(firstPeerId, CancellationToken.None));
+        Assert.True(await service.AuthorizePeerAsync(secondPeerId, CancellationToken.None));
+        Assert.False(await service.AuthorizePeerAsync(Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task MultiPeerFanoutRequiresEveryActivePeerAcknowledgement()
     {
         Directory.CreateDirectory(SaveRoot);

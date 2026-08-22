@@ -547,7 +547,7 @@ public sealed class SaveSyncCoordinator(
     {
         if (deviceId == Guid.Empty || deviceId == Settings.DeviceId) return false;
         var trusted = Settings.EffectiveTrustedPeers.FirstOrDefault(peer => peer.DeviceId == deviceId);
-        if (trusted is not null && trusted.State != TrustedPeerState.Active) return false;
+        if (trusted is not null) return trusted.State == TrustedPeerState.Active;
         if (Settings.PeerDeviceId is { } pinned)
         {
             if (pinned != deviceId) return false;
