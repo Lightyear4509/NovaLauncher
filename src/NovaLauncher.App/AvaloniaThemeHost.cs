@@ -9,11 +9,8 @@ public sealed class AvaloniaThemeHost : IThemeHost
 {
     private static readonly Dictionary<string, Palette> Palettes = new(StringComparer.Ordinal)
     {
-        ["nova-dark"] = new("#080D1A", "#10182B", "#172442", "#293858", "#F8FAFF", "#AEB9D2", "#52DAFF", "#9B6DFF", "#53D79A", "#F4BF58", "#FF6B7A", "#D9080D1A", "#263E72", "#1C2A48", "#29446E", "#14213B"),
-        ["midnight-blue"] = new("#061320", "#0C2135", "#12334F", "#285674", "#F4FAFF", "#B3D2E3", "#48CFFF", "#7D91FF", "#55D5A0", "#F0BE62", "#FF7582", "#D9061320", "#1D4E72", "#1D4765", "#2B668A", "#15374F"),
-        ["ember"] = new("#1A0E12", "#2A171C", "#3E2229", "#713D48", "#FFF8F4", "#DFC2BC", "#FF9B68", "#D56DFF", "#6DDAA2", "#F6C45D", "#FF7180", "#D91A0E12", "#67313D", "#673840", "#8B4D58", "#49262D"),
-        ["forest"] = new("#081510", "#10241C", "#17362A", "#2B5C49", "#F3FFF9", "#B8D6C8", "#57D69A", "#7EA6FF", "#57D69A", "#F0C05F", "#FF7380", "#D9081510", "#245742", "#285A46", "#37765C", "#1A4031"),
-        ["nova-light"] = new("#EEF3FA", "#FFFFFF", "#E0E9F6", "#AEC0D8", "#15213A", "#4A5A73", "#006FA8", "#7052D9", "#147A54", "#936300", "#BC3345", "#E6EEF3FA", "#D4E5F7", "#D7E4F3", "#C4D9EF", "#AEC4DE"),
+        ["nova-dark"] = new("#0C1017", "#121821", "#18202B", "#293340", "#F2F5F8", "#98A4B3", "#4C8DFF", "#6BA2FF", "#4CCB83", "#E6B450", "#F06472", "#E60C1017", "#192A43", "#1B2430", "#253243", "#151D27"),
+        ["nova-light"] = new("#F3F5F8", "#FFFFFF", "#E9EDF2", "#C9D0D9", "#18212D", "#5F6B79", "#276FDB", "#4C8DFF", "#168451", "#946200", "#C53F50", "#E8F3F5F8", "#E5EDF9", "#EEF1F5", "#E1E7EE", "#D3DAE3"),
     };
 
     public string CurrentThemeId { get; private set; } = "nova-dark";
@@ -28,6 +25,7 @@ public sealed class AvaloniaThemeHost : IThemeHost
         resources["ThemeBackground"] = Brush.Parse(palette.Background);
         resources["ThemeSurface"] = Brush.Parse(palette.Surface);
         resources["ThemeElevated"] = Brush.Parse(palette.Elevated);
+        resources["ThemeSurfaceSubtle"] = Brush.Parse(themeId == "nova-light" ? "#F5F7FA" : "#151C26");
         resources["ThemeBorder"] = Brush.Parse(palette.Border);
         resources["ThemeText"] = Brush.Parse(palette.Text);
         resources["ThemeMuted"] = Brush.Parse(palette.Muted);

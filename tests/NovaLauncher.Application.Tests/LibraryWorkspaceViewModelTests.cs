@@ -23,9 +23,12 @@ public sealed class LibraryWorkspaceViewModelTests
         Assert.True(fixture.Workspace.IsLibraryPage);
         fixture.Workspace.NavigateTo("Saves");
         Assert.True(fixture.Workspace.IsSavesPage);
-        Assert.Contains("transfer activity", fixture.Workspace.Status, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("save health", fixture.Workspace.Status, StringComparison.OrdinalIgnoreCase);
+        fixture.Workspace.NavigateTo("Downloads");
+        Assert.True(fixture.Workspace.IsDownloadsPage);
+        Assert.Contains("game sharing", fixture.Workspace.Status, StringComparison.OrdinalIgnoreCase);
         fixture.Workspace.NavigateTo("Unknown");
-        Assert.True(fixture.Workspace.IsSavesPage);
+        Assert.True(fixture.Workspace.IsDownloadsPage);
     }
 
     [Fact]

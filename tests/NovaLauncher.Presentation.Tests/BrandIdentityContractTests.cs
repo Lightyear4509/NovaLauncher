@@ -60,7 +60,7 @@ public sealed class BrandIdentityContractTests
         Assert.Contains("LOCAL-FIRST", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"NOVA\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"LAUNCHER\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Classes=\"primary hero-action\" Content=\"▶  Play\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Classes=\"primary hero-action\" Content=\"Play\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Classes=\"game-tile\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Reduce interface motion\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Toggle navigation size\"", xaml, StringComparison.Ordinal);

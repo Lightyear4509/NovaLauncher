@@ -17,7 +17,8 @@
     <None Include="..\..\src\NovaLauncher.App\Views\Pages\HomeView.axaml" Link="Views\Pages\HomeView.axaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\src\NovaLauncher.App\Views\Pages\LibraryView.axaml" Link="Views\Pages\LibraryView.axaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\src\NovaLauncher.App\Views\Pages\GameDetailsView.axaml" Link="Views\Pages\GameDetailsView.axaml" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\src\NovaLauncher.App\Views\Pages\TransfersView.axaml" Link="Views\Pages\TransfersView.axaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\NovaLauncher.App\Views\Pages\SavesView.axaml" Link="Views\Pages\SavesView.axaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\NovaLauncher.App\Views\Pages\DownloadsSharingView.axaml" Link="Views\Pages\DownloadsSharingView.axaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\src\NovaLauncher.App\Views\Pages\SettingsView.axaml" Link="Views\Pages\SettingsView.axaml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

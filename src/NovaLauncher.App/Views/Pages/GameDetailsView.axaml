@@ -14,7 +14,7 @@
     x:DataType="vm:MainWindowViewModel">
   <ScrollViewer HorizontalScrollBarVisibility="Disabled">
     <StackPanel Margin="36,24,36,44" Spacing="20">
-      <Button Content="←  Library" Classes="quiet" Click="OnShowLibrary" HorizontalAlignment="Left" AutomationProperties.Name="Back to Library" />
+      <Button Content="Back to Library" Classes="quiet" Click="OnShowLibrary" HorizontalAlignment="Left" AutomationProperties.Name="Back to Library" />
 
       <Border Classes="hero" MinHeight="390" ClipToBounds="True">
         <Grid>
@@ -38,7 +38,7 @@
               <TextBlock Text="{Binding Workspace.SelectedGameGenres}" Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" MaxLines="2" />
               <TextBlock Text="{Binding Workspace.SelectedGameLastPlayed, StringFormat='Last played: {0}'}" Foreground="{DynamicResource ThemeMuted}" TextWrapping="Wrap" />
               <WrapPanel ItemSpacing="10" Margin="0,8,0,0">
-                <Button Classes="primary hero-action" Content="▶  Play" Click="OnLaunch" AutomationProperties.Name="Launch selected game" />
+                <Button Classes="primary hero-action" Content="Play" Click="OnLaunch" AutomationProperties.Name="Launch selected game" />
                 <Button Classes="glass" Content="{Binding Workspace.SelectedGameFavoriteLabel}" Click="OnToggleFavorite" AutomationProperties.Name="Toggle selected game favorite" />
                 <Button Classes="glass" Content="Edit game" Click="OnEditSelectedGame" AutomationProperties.Name="Edit selected game" />
               </WrapPanel>

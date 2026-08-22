@@ -101,9 +101,6 @@ public sealed class ThemeService(
     public IReadOnlyList<ThemeOption> Themes { get; } =
     [
         new("nova-dark", "Nova Dark"),
-        new("midnight-blue", "Midnight Blue"),
-        new("ember", "Ember"),
-        new("forest", "Forest"),
         new("nova-light", "Nova Light"),
     ];
 

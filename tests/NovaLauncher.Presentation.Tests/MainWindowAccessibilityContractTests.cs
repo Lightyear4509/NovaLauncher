@@ -41,7 +41,7 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.DoesNotContain("Artwork.Cover.Location", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Refresh metadata\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Save game\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"▶  Play\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Play\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Request administrator permission for this game\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"SteamGridDB API key\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Open Home page\"", xaml, StringComparison.Ordinal);
@@ -61,7 +61,7 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("AutomationProperties.Name=\"Rescan bounded game transfer manifest\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding Workspace.GameTransferAuthorizationHint}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsEnabled=\"{Binding Workspace.CanAuthorizeGameTransfer}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"{Binding Workspace.AuthorizeGameTransferButtonText}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Review and share\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Trusted game transfer recipient\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Attest game copy rights\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Authorize reviewed game transfer to selected peer\"", xaml, StringComparison.Ordinal);
@@ -87,8 +87,9 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("AutomationProperties.Name=\"Confirm upload of existing save files\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Decline upload of existing save files\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Open Settings and Diagnostics page\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("AutomationProperties.Name=\"Built-in color theme\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("AutomationProperties.Name=\"Apply selected built-in theme\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Open Downloads and Sharing page\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Nova appearance mode\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Apply selected Nova appearance mode\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Controller connection status\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text size (100–200%)", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Interface text scale\"", xaml, StringComparison.Ordinal);

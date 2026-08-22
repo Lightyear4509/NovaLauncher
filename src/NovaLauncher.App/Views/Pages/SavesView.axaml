@@ -1,0 +1,62 @@
+<views:NovaPage
+    x:Class="NovaLauncher.App.Views.Pages.SavesView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:NovaLauncher.App.Views"
+    xmlns:saveSync="using:NovaLauncher.Application.SaveSync"
+    xmlns:libraryDomain="using:NovaLauncher.Domain.Library"
+    xmlns:vm="using:NovaLauncher.Application"
+    x:DataType="vm:MainWindowViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="32,28,32,44" Spacing="24" MaxWidth="1180" HorizontalAlignment="Left">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
+        <StackPanel Spacing="5"><TextBlock Text="Saves" Classes="page-title" /><TextBlock Text="Save health, snapshots, conflicts, and recovery" Classes="page-subtitle" /></StackPanel>
+        <Button Grid.Column="1" Classes="quiet" Content="Trusted devices" Click="OnShowSettings" VerticalAlignment="Center" AutomationProperties.Name="Configure trusted save devices" />
+      </Grid>
+
+      <Border Classes="professional-card">
+        <StackPanel Spacing="14">
+          <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8"><StackPanel><TextBlock Text="Current save operation" Classes="section-title" /><TextBlock Text="Authenticated progress is retained when paused." Classes="caption" /></StackPanel><Button Grid.Column="1" Content="Pause" Click="OnPauseSaveTransfer" IsEnabled="{Binding Workspace.IsSaveTransferActive}" AutomationProperties.Name="Pause active save transfer" /><Button Grid.Column="2" Classes="quiet" Content="{Binding Workspace.CancelSaveTransferButtonText}" Click="OnCancelSaveTransfer" AutomationProperties.Name="Cancel unverified partial save transfer data" /><Border Grid.Column="3" Classes="status-badge"><TextBlock Text="{Binding Workspace.SaveTransferDirection}" FontWeight="SemiBold" /></Border></Grid>
+          <ProgressBar Minimum="0" Maximum="100" Value="{Binding Workspace.SaveTransferProgress}" Height="6" AutomationProperties.Name="Current save transfer byte progress" />
+          <Grid ColumnDefinitions="2*,2*,*,*" ColumnSpacing="20">
+            <StackPanel><TextBlock Text="Device" Classes="field-label" /><TextBlock Text="{Binding Workspace.SaveTransferDevice}" TextTrimming="CharacterEllipsis" /></StackPanel>
+            <StackPanel Grid.Column="1"><TextBlock Text="File" Classes="field-label" /><TextBlock Text="{Binding Workspace.SaveTransferFile}" TextTrimming="CharacterEllipsis" /></StackPanel>
+            <StackPanel Grid.Column="2"><TextBlock Text="Speed" Classes="field-label" /><TextBlock Text="{Binding Workspace.SaveTransferRate}" /></StackPanel>
+            <StackPanel Grid.Column="3"><TextBlock Text="ETA" Classes="field-label" /><TextBlock Text="{Binding Workspace.SaveTransferEta}" /></StackPanel>
+          </Grid>
+          <TextBlock Text="{Binding Workspace.ActiveSaveTransfer}" Classes="caption" TextWrapping="Wrap" AutomationProperties.Name="Current save transfer status" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="professional-card">
+        <StackPanel Spacing="14">
+          <Grid ColumnDefinitions="*,Auto"><StackPanel><TextBlock Text="Games and sync health" Classes="section-title" /><TextBlock Text="Mapped manual games, last successful synchronization, and work that needs attention." Classes="caption" /></StackPanel><WrapPanel Grid.Column="1" ItemSpacing="8"><Button Content="Retry pending" Click="OnRetryPendingSaveUploads" AutomationProperties.Name="Retry queued save uploads to paired device" /><Button Classes="quiet" Content="Refresh" Click="OnRefreshSaveSyncActivity" AutomationProperties.Name="Refresh save activity" /></WrapPanel></Grid>
+          <ItemsControl ItemsSource="{Binding Workspace.SaveSyncActivities}"><ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,0,0,1" Padding="2,12"><Grid ColumnDefinitions="2*,*,*,Auto" ColumnSpacing="18"><StackPanel Spacing="3"><TextBlock Text="{Binding GameName}" FontSize="16" FontWeight="SemiBold" /><TextBlock Text="{Binding SnapshotId}" Classes="caption" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="Status" Classes="field-label" /><TextBlock Text="{Binding Status}" TextWrapping="Wrap" /></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Last success" Classes="field-label" /><TextBlock Text="{Binding LastSuccess}" /><TextBlock Text="{Binding RetryReason, StringFormat='Retry: {0}'}" Classes="caption" TextWrapping="Wrap" MaxWidth="260" /></StackPanel><Border Grid.Column="3" Classes="status-badge" VerticalAlignment="Center"><TextBlock Text="{Binding FileCount, StringFormat='{}{0} files'}" /></Border></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+          <Border Classes="subtle-panel" IsVisible="{Binding !Workspace.HasSaveSyncActivities}"><TextBlock Text="No games are mapped for private save synchronization yet. Configure a manual game from Game Details." Classes="caption" TextWrapping="Wrap" /></Border>
+        </StackPanel>
+      </Border>
+
+      <Expander Header="Private snapshot destination" Classes="panel-expander">
+        <StackPanel Spacing="12" Margin="0,10,0,0">
+          <TextBlock Text="Preview: local folders only. This is user-owned backup storage, not NovaLauncher Cloud." Classes="caption" TextWrapping="Wrap" />
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8"><TextBox Text="{Binding Workspace.PrivateDestinationPath}" PlaceholderText="Absolute local folder path" AutomationProperties.Name="Private snapshot destination path" /><Button Grid.Column="1" Content="Choose…" Click="OnChoosePrivateDestination" AutomationProperties.Name="Choose private local snapshot folder" /></Grid>
+          <Grid ColumnDefinitions="*,*" ColumnSpacing="12"><StackPanel><TextBlock Text="Storage budget (MiB)" Classes="field-label" /><NumericUpDown Minimum="64" Maximum="1048576" Value="{Binding Workspace.PrivateDestinationBudgetMiB}" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="Snapshots retained per game" Classes="field-label" /><NumericUpDown Minimum="1" Maximum="20" Value="{Binding Workspace.PrivateDestinationRetention}" /></StackPanel></Grid>
+          <CheckBox Content="Include selected notes and tags in a separate metadata package" IsChecked="{Binding Workspace.SyncPrivateMetadata}" />
+          <Button Classes="primary" Content="Verify and configure destination" Click="OnConfigurePrivateDestination" HorizontalAlignment="Left" />
+          <Separator />
+          <ComboBox ItemsSource="{Binding Workspace.Games}" SelectedItem="{Binding Workspace.PrivateDestinationGame}" PlaceholderText="Choose a game with save snapshots"><ComboBox.ItemTemplate><DataTemplate x:DataType="libraryDomain:LibraryItem"><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+          <WrapPanel ItemSpacing="8"><Button Content="Preview publish" Click="OnPreviewPrivateDestinationPublish" /><Button Classes="quiet" Content="Refresh snapshots" Click="OnRefreshPrivateDestinationSnapshots" /></WrapPanel>
+          <Border Classes="subtle-panel" IsVisible="{Binding Workspace.HasDestinationPublishPreview}"><StackPanel Spacing="7"><TextBlock Text="{Binding Workspace.DestinationPublishPreview.Summary}" TextWrapping="Wrap" /><TextBlock Text="{Binding Workspace.DestinationPublishPreview.SnapshotBytes, StringFormat='Snapshot: {0:N0} bytes'}" /><TextBlock Text="{Binding Workspace.DestinationPublishPreview.BytesToRemove, StringFormat='Retention removal: {0:N0} bytes'}" /><Button Classes="primary" Content="Publish reviewed snapshot" Click="OnPublishPrivateDestination" IsEnabled="{Binding Workspace.DestinationPublishPreview.CanPublish}" HorizontalAlignment="Left" /></StackPanel></Border>
+          <ListBox ItemsSource="{Binding Workspace.PrivateDestinationSnapshots}" SelectedItem="{Binding Workspace.PrivateDestinationSnapshot}" MaxHeight="150"><ListBox.ItemTemplate><DataTemplate x:DataType="saveSync:SaveSnapshotHistoryItem"><Grid ColumnDefinitions="*,Auto"><TextBlock Text="{Binding SnapshotId}" /><TextBlock Grid.Column="1" Text="{Binding IntegrityValid, StringFormat='Verified: {0}'}" /></Grid></DataTemplate></ListBox.ItemTemplate></ListBox>
+          <Button Content="Preview quarantine or repair" Click="OnPreviewPrivateDestinationRepair" HorizontalAlignment="Left" />
+          <Border Classes="warning-notice" IsVisible="{Binding Workspace.HasDestinationRepairPreview}"><StackPanel Spacing="7"><TextBlock Text="{Binding Workspace.DestinationRepairPreview.ProposedAction}" FontWeight="SemiBold" TextWrapping="Wrap" /><TextBlock Text="{Binding Workspace.DestinationRepairPreview.Summary}" TextWrapping="Wrap" /><Button Classes="destructive" Content="Confirm destination-only quarantine" Click="OnQuarantinePrivateDestinationSnapshot" IsEnabled="{Binding Workspace.DestinationRepairPreview.CanRepair}" HorizontalAlignment="Left" /></StackPanel></Border>
+        </StackPanel>
+      </Expander>
+
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="20">
+        <Border Classes="professional-card"><StackPanel Spacing="10"><TextBlock Text="NovaLauncher data backup" Classes="section-title" /><TextBlock Text="Export library, collections, settings, and manual overrides. Credentials and disposable caches are excluded." Classes="caption" TextWrapping="Wrap" /><TextBox Text="{Binding Workspace.BackupPath}" PlaceholderText="C:\Backups\NovaLauncher.zip" AutomationProperties.Name="NovaLauncher backup archive path" /><WrapPanel ItemSpacing="8"><Button Classes="primary" Content="Export backup" Click="OnExport" AutomationProperties.Name="Export local NovaLauncher backup from Saves page" /><Button Content="{Binding Workspace.RestoreButtonText}" Click="OnRestore" AutomationProperties.Name="Restore local NovaLauncher backup from Saves page" /></WrapPanel></StackPanel></Border>
+        <Border Grid.Column="1" Classes="professional-card"><StackPanel Spacing="10"><TextBlock Text="Cross-device save linking" Classes="section-title" /><TextBlock Text="Configure trusted devices globally, then map eligible manual games from Game Details. Conflicts block launch rather than overwriting either side." Classes="caption" TextWrapping="Wrap" /><Button Content="Manage trusted devices" Click="OnShowSettings" HorizontalAlignment="Left" AutomationProperties.Name="Configure cross-device save linking" /></StackPanel></Border>
+      </Grid>
+    </StackPanel>
+  </ScrollViewer>
+</views:NovaPage>

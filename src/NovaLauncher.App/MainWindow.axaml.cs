@@ -18,7 +18,7 @@ public sealed partial class MainWindow : Window
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly DispatcherTimer _controllerPollTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     private IControllerInputService? _controllerInput;
-    private ControllerButtons _previousControllerButtons;
+    private readonly ControllerNavigationState _controllerNavigation = new();
     private bool _controllerWasConnected;
     private TrayIcon? _trayIcon;
     private bool _forceClose;
@@ -52,6 +52,7 @@ public sealed partial class MainWindow : Window
     private void OnShowHome(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateTo("Home");
     private void OnShowLibrary(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateTo("Library");
     private void OnShowSaves(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateTo("Saves");
+    private void OnShowDownloads(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateTo("Downloads");
     private void OnShowSettings(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateTo("Settings");
     private void OnNavigateBack(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateBack();
     private void OnNavigateForward(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateForward();
@@ -76,8 +77,13 @@ public sealed partial class MainWindow : Window
         }
         else if (ViewModel.Workspace?.IsControllerMode == true && e.Key is Key.Left or Key.Up or Key.Right or Key.Down)
         {
-            e.Handled = FocusManager?.TryMoveFocus(
-                e.Key is Key.Left or Key.Up ? NavigationDirection.Previous : NavigationDirection.Next) == true;
+            e.Handled = MoveControllerFocus(e.Key switch
+            {
+                Key.Left => NavigationDirection.Left,
+                Key.Up => NavigationDirection.Up,
+                Key.Right => NavigationDirection.Right,
+                _ => NavigationDirection.Down,
+            });
         }
     }
 
@@ -125,7 +131,7 @@ public sealed partial class MainWindow : Window
     {
         var enabled = ViewModel.Workspace?.IsControllerMode == true;
         WindowState = enabled ? WindowState.FullScreen : WindowState.Normal;
-        _previousControllerButtons = ControllerButtons.None;
+        _controllerNavigation.Reset();
         if (enabled)
         {
             PollController();
@@ -149,32 +155,45 @@ public sealed partial class MainWindow : Window
             if (_controllerWasConnected || ViewModel.Workspace.ControllerConnectionStatus.StartsWith("Controller input", StringComparison.Ordinal))
                 ViewModel.Workspace.ReportControllerConnection(false, 0, _controllerInput.BackendName);
             _controllerWasConnected = false;
-            _previousControllerButtons = ControllerButtons.None;
+            _controllerNavigation.Reset();
             return;
         }
 
         if (!_controllerWasConnected)
             ViewModel.Workspace.ReportControllerConnection(true, state.ControllerIndex, _controllerInput.BackendName);
         _controllerWasConnected = true;
-        var pressed = state.Buttons & ~_previousControllerButtons;
-        _previousControllerButtons = state.Buttons;
+        var pressed = _controllerNavigation.Update(state.Buttons, DateTimeOffset.UtcNow);
 
         if ((pressed & ControllerButtons.Back) != 0)
         {
-            if (ViewModel.Workspace.CanNavigateBack) ViewModel.Workspace.NavigateBack();
+            if (ViewModel.Workspace.CanNavigateBack)
+            {
+                ViewModel.Workspace.NavigateBack();
+                FocusCurrentControllerPageButton();
+            }
             else await ExecuteAsync(() => ViewModel.Workspace.ToggleControllerModeAsync(_lifetimeCancellation.Token));
             return;
         }
-        if ((pressed & ControllerButtons.Previous) != 0) ViewModel.Workspace.NavigateBack();
-        if ((pressed & ControllerButtons.Next) != 0) ViewModel.Workspace.NavigateForward();
+        if ((pressed & ControllerButtons.Previous) != 0 && ViewModel.Workspace.CanNavigateBack)
+        {
+            ViewModel.Workspace.NavigateBack();
+            FocusCurrentControllerPageButton();
+        }
+        if ((pressed & ControllerButtons.Next) != 0 && ViewModel.Workspace.CanNavigateForward)
+        {
+            ViewModel.Workspace.NavigateForward();
+            FocusCurrentControllerPageButton();
+        }
 
         var direction = (pressed & (ControllerButtons.Left | ControllerButtons.Up | ControllerButtons.Right | ControllerButtons.Down)) switch
         {
-            var value when (value & (ControllerButtons.Left | ControllerButtons.Up)) != 0 => NavigationDirection.Previous,
-            var value when (value & (ControllerButtons.Right | ControllerButtons.Down)) != 0 => NavigationDirection.Next,
+            var value when (value & ControllerButtons.Left) != 0 => NavigationDirection.Left,
+            var value when (value & ControllerButtons.Up) != 0 => NavigationDirection.Up,
+            var value when (value & ControllerButtons.Right) != 0 => NavigationDirection.Right,
+            var value when (value & ControllerButtons.Down) != 0 => NavigationDirection.Down,
             _ => (NavigationDirection?)null,
         };
-        if (direction is { } navigation) FocusManager?.TryMoveFocus(navigation);
+        if (direction is { } navigation) MoveControllerFocus(navigation);
         if ((pressed & ControllerButtons.Primary) != 0 && FocusManager?.GetFocusedElement() is Button button)
             button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         else if ((pressed & ControllerButtons.Primary) != 0 && FocusManager?.GetFocusedElement() is TextBox)
@@ -182,6 +201,31 @@ public sealed partial class MainWindow : Window
         if ((pressed & ControllerButtons.Context) != 0 && FocusManager?.GetFocusedElement() is Control { ContextMenu: { } menu } control)
             menu.Open(control);
     }
+
+    private bool MoveControllerFocus(NavigationDirection direction)
+    {
+        if (FocusManager is null) return false;
+        if (FocusManager.GetFocusedElement() is not Control { IsEffectivelyVisible: true, IsEffectivelyEnabled: true })
+        {
+            FocusCurrentControllerPageButton();
+            return true;
+        }
+
+        var moved = FocusManager.TryMoveFocus(direction);
+        if (moved && FocusManager.GetFocusedElement() is Control focused) focused.BringIntoView();
+        return moved;
+    }
+
+    private void FocusCurrentControllerPageButton() => Dispatcher.UIThread.Post(() =>
+    {
+        var buttonName = ViewModel.Workspace?.CurrentPage switch
+        {
+            "Library" => "ControllerLibraryButton",
+            "Saves" => "ControllerSavesButton",
+            _ => "ControllerHomeButton",
+        };
+        this.FindControl<Button>(buttonName)?.Focus();
+    });
 
     private async Task ExecuteAsync(Func<Task> operation)
     {

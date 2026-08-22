@@ -9,7 +9,7 @@ namespace NovaLauncher.Application.Tests;
 public sealed class ThemeServiceTests
 {
     [Fact]
-    public async Task CatalogContainsFiveTrustedThemesAndLoadsSavedSelection()
+    public async Task CatalogContainsOnlyNovaAppearanceModesAndFallsBackFromRetiredPalette()
     {
         var host = new Host();
         var store = new Store(new SettingsDocument(1, LauncherSettings.Default with { ThemeId = "forest" }));
@@ -18,9 +18,9 @@ public sealed class ThemeServiceTests
         var error = await service.InitializeAsync(CancellationToken.None);
 
         Assert.Null(error);
-        Assert.Equal(5, service.Themes.Count);
-        Assert.Equal("forest", host.CurrentThemeId);
-        Assert.Equal(5, service.Themes.Select(static item => item.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(2, service.Themes.Count);
+        Assert.Equal("nova-dark", host.CurrentThemeId);
+        Assert.Equal(["nova-dark", "nova-light"], service.Themes.Select(static item => item.Id));
     }
 
     [Fact]
@@ -31,15 +31,15 @@ public sealed class ThemeServiceTests
         using var service = new ThemeService(host, store);
         await service.InitializeAsync(CancellationToken.None);
 
-        Assert.Null(await service.ApplyAsync("ember", CancellationToken.None));
-        Assert.Equal("ember", host.CurrentThemeId);
-        Assert.Equal("ember", store.Value!.Settings.ThemeId);
+        Assert.Null(await service.ApplyAsync("nova-light", CancellationToken.None));
+        Assert.Equal("nova-light", host.CurrentThemeId);
+        Assert.Equal("nova-light", store.Value!.Settings.ThemeId);
 
         store.FailSave = true;
-        var error = await service.ApplyAsync("forest", CancellationToken.None);
+        var error = await service.ApplyAsync("nova-dark", CancellationToken.None);
         Assert.NotNull(error);
-        Assert.Equal("ember", host.CurrentThemeId);
-        Assert.Equal("ember", store.Value.Settings.ThemeId);
+        Assert.Equal("nova-light", host.CurrentThemeId);
+        Assert.Equal("nova-light", store.Value.Settings.ThemeId);
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public sealed class ThemeServiceTests
         Assert.NotNull(await service.ApplyAsync("downloaded-theme", CancellationToken.None));
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ApplyAsync("forest", cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ApplyAsync("nova-light", cancellation.Token));
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public sealed class ThemeServiceTests
         Assert.Equal(selected, service.Accessibility);
 
         store.FailSave = false;
-        Assert.Null(await service.ApplyAsync("forest", CancellationToken.None));
+        Assert.Null(await service.ApplyAsync("nova-light", CancellationToken.None));
         Assert.Equal(selected, host.LastAccessibility);
     }
 

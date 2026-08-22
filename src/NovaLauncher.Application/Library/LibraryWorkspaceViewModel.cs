@@ -962,6 +962,8 @@ public sealed class LibraryWorkspaceViewModel(
 
     public bool IsSavesPage => _currentPage == "Saves";
 
+    public bool IsDownloadsPage => _currentPage == "Downloads";
+
     public bool IsSettingsPage => _currentPage == "Settings";
 
     public string CurrentPage => _currentPage;
@@ -981,6 +983,7 @@ public sealed class LibraryWorkspaceViewModel(
             OnPropertyChanged(nameof(HomeNavigationLabel));
             OnPropertyChanged(nameof(LibraryNavigationLabel));
             OnPropertyChanged(nameof(SavesNavigationLabel));
+            OnPropertyChanged(nameof(DownloadsNavigationLabel));
             OnPropertyChanged(nameof(SettingsNavigationLabel));
         }
     }
@@ -994,6 +997,8 @@ public sealed class LibraryWorkspaceViewModel(
     public string LibraryNavigationLabel => IsNavigationCompact ? "▦" : $"▦  {InterfaceLocalizer.Get(InterfaceText.Library, Culture)}";
 
     public string SavesNavigationLabel => IsNavigationCompact ? "⇅" : $"⇅  {InterfaceLocalizer.Get(InterfaceText.Saves, Culture)}";
+
+    public string DownloadsNavigationLabel => IsNavigationCompact ? "↔" : "↔  Downloads & Sharing";
 
     public string SettingsNavigationLabel => IsNavigationCompact ? "⚙" : $"⚙  {InterfaceLocalizer.Get(InterfaceText.Settings, Culture)}";
 
@@ -1020,7 +1025,7 @@ public sealed class LibraryWorkspaceViewModel(
 
     private void NavigateCore(string page, bool recordHistory)
     {
-        if (page is not ("Home" or "Library" or "Details" or "Saves" or "Settings") || string.Equals(_currentPage, page, StringComparison.Ordinal)) return;
+        if (page is not ("Home" or "Library" or "Details" or "Saves" or "Downloads" or "Settings") || string.Equals(_currentPage, page, StringComparison.Ordinal)) return;
         if (recordHistory)
         {
             _backHistory.Push(_currentPage);
@@ -1031,6 +1036,7 @@ public sealed class LibraryWorkspaceViewModel(
         OnPropertyChanged(nameof(IsLibraryPage));
         OnPropertyChanged(nameof(IsGameDetailsPage));
         OnPropertyChanged(nameof(IsSavesPage));
+        OnPropertyChanged(nameof(IsDownloadsPage));
         OnPropertyChanged(nameof(IsSettingsPage));
         OnPropertyChanged(nameof(CanNavigateBack));
         OnPropertyChanged(nameof(CanNavigateForward));
@@ -1039,7 +1045,8 @@ public sealed class LibraryWorkspaceViewModel(
         {
             "Home" => "Home shows favorites, recent additions, and locally measured playtime.",
             "Details" => SelectedGame is null ? "Choose a game from Library." : $"Viewing {SelectedGame.Name}.",
-            "Saves" => "Save-transfer activity and local backups are shown here.",
+            "Saves" => "Save health, snapshots, conflicts, and recovery are shown here.",
+            "Downloads" => "Authorized private game sharing and transfer history are shown here.",
             "Settings" => "Settings and local diagnostics. Nothing is uploaded.",
             _ => $"Library contains {library.Games.Count} game(s).",
         };

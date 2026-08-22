@@ -3,22 +3,23 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Application.Resources>
-    <SolidColorBrush x:Key="ThemeBackground" Color="#0B1020" />
-    <SolidColorBrush x:Key="ThemeSurface" Color="#111831" />
-    <SolidColorBrush x:Key="ThemeElevated" Color="#172448" />
-    <SolidColorBrush x:Key="ThemeBorder" Color="#253760" />
-    <SolidColorBrush x:Key="ThemeText" Color="#F7F8FC" />
-    <SolidColorBrush x:Key="ThemeMuted" Color="#B8C1DF" />
-    <SolidColorBrush x:Key="ThemeAccent" Color="#63D8FF" />
-    <SolidColorBrush x:Key="ThemeAccentSecondary" Color="#9B6DFF" />
+    <SolidColorBrush x:Key="ThemeBackground" Color="#0C1017" />
+    <SolidColorBrush x:Key="ThemeSurface" Color="#121821" />
+    <SolidColorBrush x:Key="ThemeElevated" Color="#18202B" />
+    <SolidColorBrush x:Key="ThemeSurfaceSubtle" Color="#151C26" />
+    <SolidColorBrush x:Key="ThemeBorder" Color="#293340" />
+    <SolidColorBrush x:Key="ThemeText" Color="#F2F5F8" />
+    <SolidColorBrush x:Key="ThemeMuted" Color="#98A4B3" />
+    <SolidColorBrush x:Key="ThemeAccent" Color="#4C8DFF" />
+    <SolidColorBrush x:Key="ThemeAccentSecondary" Color="#6BA2FF" />
     <SolidColorBrush x:Key="ThemeSuccess" Color="#54D89B" />
     <SolidColorBrush x:Key="ThemeWarning" Color="#F4BF58" />
     <SolidColorBrush x:Key="ThemeDanger" Color="#FF6B7A" />
     <SolidColorBrush x:Key="ThemeOverlay" Color="#D90B1020" />
-    <SolidColorBrush x:Key="ThemeNavSelected" Color="#263E72" />
-    <SolidColorBrush x:Key="ThemeButton" Color="#253760" />
-    <SolidColorBrush x:Key="ThemeButtonHover" Color="#36558C" />
-    <SolidColorBrush x:Key="ThemeButtonPressed" Color="#182A50" />
+    <SolidColorBrush x:Key="ThemeNavSelected" Color="#192A43" />
+    <SolidColorBrush x:Key="ThemeButton" Color="#1B2430" />
+    <SolidColorBrush x:Key="ThemeButtonHover" Color="#253243" />
+    <SolidColorBrush x:Key="ThemeButtonPressed" Color="#151D27" />
     <SolidColorBrush x:Key="ThemeHeroScrim" Color="#B8090E1A" />
     <SolidColorBrush x:Key="ThemeCardScrim" Color="#99080D1A" />
     <x:TimeSpan x:Key="MotionDuration">0:0:0.16</x:TimeSpan>
@@ -47,13 +48,13 @@
       <Setter Property="BorderThickness" Value="{DynamicResource FocusBorderThickness}" />
     </Style>
     <Style Selector="Button">
-      <Setter Property="MinHeight" Value="42" />
-      <Setter Property="Padding" Value="18,9" />
+      <Setter Property="MinHeight" Value="40" />
+      <Setter Property="Padding" Value="16,8" />
       <Setter Property="Background" Value="{DynamicResource ThemeButton}" />
       <Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
       <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="CornerRadius" Value="8" />
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="Opacity" Value="1" />
       <Setter Property="Transitions">
@@ -73,6 +74,21 @@
     </Style>
     <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource ThemeAccentSecondary}" />
+    </Style>
+    <Style Selector="Button:disabled">
+      <Setter Property="Opacity" Value="0.48" />
+    </Style>
+    <Style Selector="Button.segment">
+      <Setter Property="MinWidth" Value="104" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeMuted}" />
+    </Style>
+    <Style Selector="Button.segment.active">
+      <Setter Property="Background" Value="{DynamicResource ThemeAccent}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeAccent}" />
+      <Setter Property="Foreground" Value="White" />
     </Style>
     <Style Selector="Button.subtle">
       <Setter Property="Background" Value="Transparent" />
@@ -142,6 +158,39 @@
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="16" />
       <Setter Property="Padding" Value="24" />
+    </Style>
+    <Style Selector="Button.destructive">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeDanger}" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeDanger}" />
+    </Style>
+    <Style Selector="Border.professional-card">
+      <Setter Property="Background" Value="{DynamicResource ThemeSurface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="24" />
+    </Style>
+    <Style Selector="Border.subtle-panel">
+      <Setter Property="Background" Value="{DynamicResource ThemeSurfaceSubtle}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="14" />
+    </Style>
+    <Style Selector="Border.transfer-row">
+      <Setter Property="Background" Value="{DynamicResource ThemeSurface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="18" />
+    </Style>
+    <Style Selector="Border.status-badge, Border.trust-status">
+      <Setter Property="Background" Value="{DynamicResource ThemeSurfaceSubtle}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="12,7" />
     </Style>
     <Style Selector="Border.elevated-card">
       <Setter Property="Background" Value="{DynamicResource ThemeElevated}" />
@@ -282,6 +331,17 @@
       <Setter Property="FontWeight" Value="Bold" />
       <Setter Property="Foreground" Value="{DynamicResource ThemeAccent}" />
       <Setter Property="LetterSpacing" Value="1.4" />
+    </Style>
+    <Style Selector="TextBlock.field-label">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeMuted}" />
+    </Style>
+    <Style Selector="ListBox.clean-list">
+      <Setter Property="Background" Value="{DynamicResource ThemeSurfaceSubtle}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
     </Style>
   </Application.Styles>
 </Application>
