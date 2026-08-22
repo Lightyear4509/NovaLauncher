@@ -103,8 +103,8 @@ public sealed class BrandIdentityContractTests
         var xaml = await ReadPresentationAsync();
 
         Assert.Contains("AutomationProperties.Name=\"Launch featured game\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("AutomationProperties.Name=\"Recently played games\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("AutomationProperties.Name=\"Most played games\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Ordered Home sections\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Home section layout\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Workspace.TotalLibraryPlayTime", xaml, StringComparison.Ordinal);
         Assert.Contains("monitored locally", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Not tracked. NovaLauncher does not monitor playtime", xaml, StringComparison.Ordinal);

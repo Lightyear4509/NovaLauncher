@@ -10,7 +10,7 @@ namespace NovaLauncher.Application.GameTransfer;
 public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport, ISaveSyncService saveSync, TimeProvider timeProvider, string dataRoot, IReceivedContentScanner? contentScanner = null) : IGameTransferService, IDisposable
 {
     public const int MaximumFiles = 50_000;
-    public const long MaximumFileBytes = 16L * 1024 * 1024 * 1024;
+    public const long MaximumFileBytes = 700L * 1024 * 1024 * 1024;
     public const long MaximumPackageBytes = 700L * 1024 * 1024 * 1024;
     public const int ChunkBytes = 1024 * 1024;
     public const long MaximumBytesPerSecond = 64L * 1024 * 1024;
@@ -56,7 +56,7 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
                 var info = new FileInfo(path);
                 if ((info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.SparseFile | FileAttributes.Device)) != 0) return Reject(game.Name, root, $"Unsafe file attributes were detected for {info.Name}.");
                 var relative = NormalizeRelativePath(Path.GetRelativePath(root, path));
-                if (!IsSafeRelativePath(relative) || info.Length > MaximumFileBytes) return Reject(game.Name, root, $"Unsafe or oversized package file: {relative}.");
+                if (!IsSafeRelativePath(relative) || !IsFileSizeWithinLimit(info.Length)) return Reject(game.Name, root, $"Unsafe or oversized package file: {relative}.");
                 total = checked(total + info.Length);
                 if (!IsPackageSizeWithinLimit(total)) return Reject(game.Name, root, "The package exceeds the 700 GiB aggregate size limit.");
                 var beforeLength = info.Length;
@@ -75,7 +75,7 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
 
     public async Task<GameTransferResult> AuthorizeAsync(LibraryItem game, GameTransferPreview preview, IReadOnlyCollection<Guid> recipientDeviceIds, bool userAttestedCopyRights, CancellationToken cancellationToken)
     {
-        if (!userAttestedCopyRights) return new(false, false, "Confirm that you are authorized to copy this DRM-free game folder.");
+        if (!userAttestedCopyRights) return new(false, false, "Confirm that you own or are authorized to copy this game folder.");
         if (!preview.Accepted || preview.Error is not null) return new(false, false, preview.Error ?? "Create a valid preview first.");
         var rescanned = await PreviewAsync(game, preview.SourceFolder, cancellationToken).ConfigureAwait(false);
         if (!rescanned.Accepted || !ManifestFilesEqual(preview.Files, rescanned.Files)) return new(false, false, rescanned.Error ?? "The source changed after preview; review it again.");
@@ -202,6 +202,7 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
     }
 
     private bool IsActivePeer(Guid id) => saveSync.Settings.EffectiveTrustedPeers.Any(peer => peer.DeviceId == id && peer.State == TrustedPeerState.Active);
+    public static bool IsFileSizeWithinLimit(long fileBytes) => fileBytes is >= 0 and <= MaximumFileBytes;
     public static bool IsPackageSizeWithinLimit(long totalBytes) => totalBytes is >= 0 and <= MaximumPackageBytes;
     private static bool ManifestFilesEqual(IReadOnlyList<GameTransferFile> left, IReadOnlyList<GameTransferFile> right) => left.Count == right.Count && left.Zip(right).All(pair => pair.First == pair.Second);
     private static GameTransferPreview Reject(string name, string source, string error) => new(false, name, source, [], [], 0, error);
@@ -248,7 +249,7 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
         error = null;
         if (manifest.OfferId == Guid.Empty || manifest.GameId.Value == Guid.Empty || manifest.SenderDeviceId != sender || manifest.PackageName.Length is < 1 or > 200 || manifest.Files.Count is <= 0 or > MaximumFiles || !IsPackageSizeWithinLimit(manifest.TotalBytes)) { error = "The peer transfer manifest is invalid."; return false; }
         long total = 0; var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in manifest.Files) { if (!IsSafeRelativePath(file.RelativePath) || !paths.Add(file.RelativePath) || file.Length is < 0 or > MaximumFileBytes || file.Sha256.Length != 64 || !file.Sha256.All(Uri.IsHexDigit)) { error = "The peer transfer manifest contains an unsafe file."; return false; } total = checked(total + file.Length); }
+        foreach (var file in manifest.Files) { if (!IsSafeRelativePath(file.RelativePath) || !paths.Add(file.RelativePath) || !IsFileSizeWithinLimit(file.Length) || file.Sha256.Length != 64 || !file.Sha256.All(Uri.IsHexDigit)) { error = "The peer transfer manifest contains an unsafe file."; return false; } total = checked(total + file.Length); }
         if (total != manifest.TotalBytes) { error = "The peer transfer manifest size is inconsistent."; return false; }
         return true;
     }

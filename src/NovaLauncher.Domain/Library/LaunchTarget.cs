@@ -6,6 +6,8 @@ public sealed record LaunchTarget(
     string? WorkingDirectory,
     LaunchTargetKind Kind);
 
+public sealed record GameLaunchAction(Guid Id, string Label, LaunchTarget Target);
+
 public enum LaunchTargetKind
 {
     Executable = 0,

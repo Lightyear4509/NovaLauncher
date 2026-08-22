@@ -11,6 +11,8 @@ public sealed partial class TransfersView : NovaPage
     private void OnShowSettings(object? sender, RoutedEventArgs e) => Workspace.NavigateTo("Settings");
     private void OnRefreshSaveSyncActivity(object? sender, RoutedEventArgs e) => Workspace.RefreshSaveSyncActivities();
     private void OnPauseGameTransfer(object? sender, RoutedEventArgs e) => Workspace.PauseGameTransfer();
+    private void OnPauseSaveTransfer(object? sender, RoutedEventArgs e) => Workspace.PauseSaveTransfer();
+    private async void OnCancelSaveTransfer(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.CancelPartialSaveTransfersAsync(LifetimeToken));
     private async void OnRetryPendingSaveUploads(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RetryPendingSaveUploadsAsync(LifetimeToken));
     private async void OnPreviewGameTransfer(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.PreviewSelectedGameTransferAsync(LifetimeToken));
     private async void OnAuthorizeGameTransfer(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.AuthorizeSelectedGameTransferAsync(LifetimeToken));

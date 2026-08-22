@@ -61,6 +61,11 @@ public sealed class SaveSyncCoordinatorTests : IDisposable
         Assert.Null(await service.SetPeerPausedAsync(peerId, false, CancellationToken.None));
         Assert.True(await service.AuthorizePeerAsync(peerId, CancellationToken.None));
 
+        var beforeRotation = credentials.GetSecret(peerId)!;
+        Assert.Null(await service.RotatePeerCredentialAsync(peerId, CancellationToken.None));
+        Assert.NotEqual(beforeRotation, credentials.GetSecret(peerId));
+        Assert.False(credentials.ContainsPendingSecret(peerId));
+
         Assert.Null(await service.RevokePeerAsync(peerId, CancellationToken.None));
         Assert.Equal(TrustedPeerState.Revoked, Assert.Single(service.Settings.EffectiveTrustedPeers).State);
         Assert.False(credentials.ContainsSecret(peerId));
@@ -94,6 +99,33 @@ public sealed class SaveSyncCoordinatorTests : IDisposable
         Assert.Equal(SaveSyncStatus.QueuedOffline, result.Status);
         Assert.Equal(peers.Order(), transport.PushedPeers.Order());
         Assert.Contains("Partial fan-out", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PerGameDestinationPolicyLimitsFanoutAndSurvivesQueuedState()
+    {
+        Directory.CreateDirectory(SaveRoot);
+        await File.WriteAllTextAsync(Path.Combine(SaveRoot, "slot.sav"), "one");
+        var peers = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
+        var credentials = new PeerCredentials();
+        var initial = SaveSyncDocument.CreateDefault() with
+        {
+            Settings = SaveSyncDocument.CreateDefault().Settings with
+            {
+                TrustedPeers = peers.Select((id, index) => new TrustedSaveSyncPeer(id, $"Device {index + 1}", $"100.64.0.{index + 2}", credentials.GetCredentialReference(id), TrustedPeerState.Active, DateTimeOffset.UtcNow)).ToArray(),
+            },
+        };
+        foreach (var peer in peers) credentials.SetSecret(peer, new byte[32]);
+        var transport = new FakeTransport();
+        var service = new SaveSyncCoordinator(new Store(initial), transport, new Secret(false), TimeProvider.System, Path.Combine(_root, "destination-policy"), TimeSpan.Zero, credentials);
+        await service.InitializeAsync(CancellationToken.None);
+        var selected = new[] { peers[0], peers[2] };
+
+        var result = await service.SnapshotAndPushAfterExitAsync(Game("Manual") with { SaveDirectory = SaveRoot, SaveSyncPeerIds = selected }, CancellationToken.None);
+
+        Assert.Equal(SaveSyncStatus.SnapshotCreated, result.Status);
+        Assert.Equal(selected.Order(), transport.PushedPeers.Order());
+        Assert.Equal(selected.Order(), Assert.Single(service.Settings.Games).DestinationPeerIds!.Order());
     }
 
     [Fact]
@@ -138,6 +170,54 @@ public sealed class SaveSyncCoordinatorTests : IDisposable
 
         Assert.True(retry.Success);
         Assert.False(retry.Conflict);
+    }
+
+    [Fact]
+    public async Task IncomingSaveUploadResumesAtDurableByteOffsetBeforeCommit()
+    {
+        var (service, _) = Create();
+        await service.InitializeAsync(CancellationToken.None);
+        var peerId = service.Settings.PeerDeviceId!.Value;
+        var gameId = new GameId(Guid.NewGuid());
+        var bytes = Enumerable.Range(0, SaveSyncCoordinator.SaveTransferChunkBytes + 37).Select(static index => (byte)(index % 251)).ToArray();
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+        var manifest = new SaveSnapshotManifest(Guid.NewGuid(), null, gameId, peerId, DateTimeOffset.UtcNow, [new("slot.sav", bytes.Length, hash)], []);
+
+        var begin = await service.BeginIncomingSnapshotAsync(peerId, manifest, ["slot.sav"], CancellationToken.None);
+        Assert.True(begin.Success, begin.Error);
+        var first = await service.ReceiveIncomingSnapshotChunkAsync(peerId, manifest.SnapshotId, "slot.sav", 0, bytes[..1000], CancellationToken.None);
+        Assert.True(first.Success, first.Error);
+
+        var resumed = await service.BeginIncomingSnapshotAsync(peerId, manifest, ["slot.sav"], CancellationToken.None);
+        Assert.Equal(1000, resumed.ResumeOffsets["slot.sav"]);
+        var second = await service.ReceiveIncomingSnapshotChunkAsync(peerId, manifest.SnapshotId, "slot.sav", 1000, bytes[1000..], CancellationToken.None);
+        Assert.True(second.Success, second.Error);
+        var completed = await service.CompleteIncomingSnapshotAsync(peerId, manifest.SnapshotId, CancellationToken.None);
+
+        Assert.True(completed.Success, completed.Error);
+        var retained = Assert.Single(await service.GetSnapshotHistoryAsync(gameId, CancellationToken.None));
+        Assert.True(retained.IntegrityValid);
+        Assert.Equal(bytes.Length, retained.TotalBytes);
+    }
+
+    [Fact]
+    public async Task ExplicitCancelRemovesOnlyIncomingUnverifiedPartialData()
+    {
+        var (service, _) = Create();
+        await service.InitializeAsync(CancellationToken.None);
+        var peerId = service.Settings.PeerDeviceId!.Value;
+        var bytes = System.Text.Encoding.UTF8.GetBytes("partial-save");
+        var manifest = new SaveSnapshotManifest(Guid.NewGuid(), null, new GameId(Guid.NewGuid()), peerId, DateTimeOffset.UtcNow,
+            [new("slot.sav", bytes.Length, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant())], []);
+        Assert.True((await service.BeginIncomingSnapshotAsync(peerId, manifest, ["slot.sav"], CancellationToken.None)).Success);
+        Assert.True((await service.ReceiveIncomingSnapshotChunkAsync(peerId, manifest.SnapshotId, "slot.sav", 0, bytes[..3], CancellationToken.None)).Success);
+
+        Assert.Null(await service.CancelIncomingPartialTransfersAsync(peerId, CancellationToken.None));
+        var restarted = await service.BeginIncomingSnapshotAsync(peerId, manifest, ["slot.sav"], CancellationToken.None);
+
+        Assert.True(restarted.Success);
+        Assert.Equal(0, restarted.ResumeOffsets["slot.sav"]);
+        Assert.Empty(await service.GetSnapshotHistoryAsync(manifest.GameId, CancellationToken.None));
     }
 
     [Fact]
@@ -263,6 +343,28 @@ public sealed class SaveSyncCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task IntegrityAuditReportsCorruptHistoryWithoutChangingSnapshots()
+    {
+        Directory.CreateDirectory(SaveRoot);
+        var (service, _) = Create();
+        await service.InitializeAsync(CancellationToken.None);
+        var game = Game("Manual") with { SaveDirectory = SaveRoot };
+        await File.WriteAllTextAsync(Path.Combine(SaveRoot, "slot.sav"), "first");
+        var first = await service.SnapshotAndPushAfterExitAsync(game, CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(SaveRoot, "slot.sav"), "second");
+        await service.SnapshotAndPushAfterExitAsync(game, CancellationToken.None);
+        var storedFile = Path.Combine(_root, "managed", "SaveSync", "Snapshots", game.Id.Value.ToString("N"), first.SnapshotId!.Value.ToString("N"), "slot.sav");
+        await File.WriteAllTextAsync(storedFile, "corrupt");
+
+        var result = await service.VerifySnapshotsAsync(game.Id, CancellationToken.None);
+
+        Assert.Equal(SaveSyncStatus.Failed, result.Status);
+        Assert.Contains("historical", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(storedFile));
+        Assert.False(Assert.Single(await service.GetSnapshotHistoryAsync(game.Id, CancellationToken.None), item => item.SnapshotId == first.SnapshotId).IntegrityValid);
+    }
+
+    [Fact]
     public async Task FirstPullNeverOverwritesExistingUntrackedSave()
     {
         Directory.CreateDirectory(SaveRoot);
@@ -276,6 +378,11 @@ public sealed class SaveSyncCoordinatorTests : IDisposable
 
         Assert.Equal(SaveSyncStatus.Conflict, result.Status);
         Assert.Equal("local", await File.ReadAllTextAsync(Path.Combine(SaveRoot, "slot.sav")));
+        var comparison = Assert.Single(await service.GetConflictComparisonAsync(game, CancellationToken.None));
+        Assert.Equal("slot.sav", comparison.RelativePath);
+        Assert.Equal("Changed", comparison.Difference);
+        Assert.Equal(5, comparison.LocalBytes);
+        Assert.Equal(6, comparison.RemoteBytes);
 
         var resolved = await service.ResolveConflictAsync(game, SaveConflictChoice.KeepRemote, CancellationToken.None);
         Assert.Equal(SaveSyncStatus.Applied, resolved.Status);
@@ -435,15 +542,22 @@ public sealed class SaveSyncCoordinatorTests : IDisposable
     private sealed class PeerCredentials : IPeerCredentialStore
     {
         private readonly Dictionary<Guid, byte[]> _secrets = [];
+        private readonly Dictionary<Guid, byte[]> _pending = [];
         public bool ContainsSecret(Guid peerDeviceId) => _secrets.ContainsKey(peerDeviceId);
         public byte[]? GetSecret(Guid peerDeviceId) => _secrets.GetValueOrDefault(peerDeviceId)?.ToArray();
         public void SetSecret(Guid peerDeviceId, ReadOnlySpan<byte> secret) => _secrets[peerDeviceId] = secret.ToArray();
         public void Clear(Guid peerDeviceId) => _secrets.Remove(peerDeviceId);
         public string GetCredentialReference(Guid peerDeviceId) => $"test/{peerDeviceId:N}";
+        public bool ContainsPendingSecret(Guid peerDeviceId) => _pending.ContainsKey(peerDeviceId);
+        public byte[]? GetPendingSecret(Guid peerDeviceId) => _pending.GetValueOrDefault(peerDeviceId)?.ToArray();
+        public void SetPendingSecret(Guid peerDeviceId, ReadOnlySpan<byte> secret) => _pending[peerDeviceId] = secret.ToArray();
+        public void PromotePendingSecret(Guid peerDeviceId) { _secrets[peerDeviceId] = _pending[peerDeviceId]; _pending.Remove(peerDeviceId); }
+        public void ClearPendingSecret(Guid peerDeviceId) => _pending.Remove(peerDeviceId);
     }
     private sealed class Clock(DateTimeOffset now) : TimeProvider { public DateTimeOffset Now { get; set; } = now; public override DateTimeOffset GetUtcNow() => Now; }
     private sealed class FakeTransport : ISaveSyncTransport
     {
+        public event Action<SaveTransferProgress>? ProgressChanged { add { } remove { } }
         public bool IsConfigured => true;
         public bool IsListening { get; private set; }
         public string ListenerStatus => IsListening ? "Listening." : "Not listening.";
@@ -462,6 +576,8 @@ public sealed class SaveSyncCoordinatorTests : IDisposable
         public Task<TransportResult> PushAsync(TrustedSaveSyncPeer peer, SaveSnapshotPayload snapshot, CancellationToken token)
         { PushedPeers.Add(peer.DeviceId); LastPush = snapshot; return Task.FromResult(peer.DeviceId == FailedPushPeer ? new TransportResult(false, false, null, "offline") : new TransportResult(true, false, null, null)); }
         public Task<PairingRedemptionResult> RedeemInvitationAsync(string code, Guid deviceId, CancellationToken token) => Redeemer is null ? Task.FromResult(new PairingRedemptionResult(false, null, null, "No inviter.")) : Redeemer(code, deviceId, token);
+        public Task<string?> RotatePeerCredentialAsync(TrustedSaveSyncPeer peer, byte[] newSecret, CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string?> CancelPartialTransfersAsync(CancellationToken token) => Task.FromResult<string?>(null);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

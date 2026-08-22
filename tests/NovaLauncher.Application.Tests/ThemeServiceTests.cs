@@ -80,6 +80,26 @@ public sealed class ThemeServiceTests
     }
 
     [Fact]
+    public async Task HomePreferencesPersistOrderVisibilityAndRejectUnknownSections()
+    {
+        var store = new Store(SettingsDocument.Default);
+        using var service = new ThemeService(new Host(), store);
+        await service.InitializeAsync(CancellationToken.None);
+        var preferences = new HomeViewPreferences(
+            ["MostPlayed", "Highlights", "RecentlyPlayed"],
+            new HashSet<string>(["RecentlyPlayed"], StringComparer.Ordinal));
+
+        Assert.Null(await service.SaveHomePreferencesAsync(preferences, CancellationToken.None));
+        Assert.Equal(preferences.SectionOrder, service.HomePreferences.SectionOrder);
+        Assert.Contains("RecentlyPlayed", service.HomePreferences.HiddenSections);
+        Assert.Equal("MostPlayed,Highlights,RecentlyPlayed", store.Value!.Settings.HomeSectionOrder);
+
+        var invalid = preferences with { SectionOrder = ["MostPlayed", "Highlights", "Downloaded"] };
+        Assert.NotNull(await service.SaveHomePreferencesAsync(invalid, CancellationToken.None));
+        Assert.Equal(preferences.SectionOrder, service.HomePreferences.SectionOrder);
+    }
+
+    [Fact]
     public async Task UnknownThemeAndCancellationAreRejected()
     {
         var host = new Host();

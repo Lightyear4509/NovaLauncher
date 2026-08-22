@@ -12,6 +12,7 @@ public sealed partial class SettingsView : NovaPage
 
     private async void OnApplyTheme(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ApplySelectedThemeAsync(LifetimeToken));
     private async void OnApplyMotionPreference(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ApplyMotionPreferenceAsync(LifetimeToken));
+    private async void OnEnterControllerMode(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.SetControllerModeAsync(true, LifetimeToken));
     private void OnApplySteamGridDbKey(object? sender, RoutedEventArgs e) => Workspace.ApplySteamGridDbApiKey();
     private async void OnSaveTailscalePeer(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ConfigureTailscalePeerAsync(LifetimeToken));
     private async void OnRetrySaveSyncListener(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RetrySaveSyncListenerAsync(LifetimeToken));
@@ -21,6 +22,7 @@ public sealed partial class SettingsView : NovaPage
     private async void OnRenameTrustedPeer(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RenameSelectedTrustedPeerAsync(LifetimeToken));
     private async void OnToggleTrustedPeer(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ToggleSelectedTrustedPeerAsync(LifetimeToken));
     private async void OnRevokeTrustedPeer(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RevokeSelectedTrustedPeerAsync(LifetimeToken));
+    private async void OnRotateTrustedPeerCredential(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RotateSelectedTrustedPeerCredentialAsync(LifetimeToken));
     private async void OnCheckForUpdates(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.CheckForUpdatesAsync(LifetimeToken));
     private async void OnStageUpdate(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.StageAvailableUpdateAsync(LifetimeToken));
     private async void OnLaunchStagedUpdate(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.LaunchStagedUpdateAsync(LifetimeToken));

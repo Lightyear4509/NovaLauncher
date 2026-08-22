@@ -16,9 +16,26 @@ using NovaLauncher.Application.Lifecycle;
 
 namespace NovaLauncher.Application.Library;
 
-public sealed record SaveSyncActivityItem(string GameName, string Status, string SnapshotId, int FileCount);
+public sealed record SaveSyncActivityItem(string GameName, string Status, string SnapshotId, int FileCount, string LastSuccess, string RetryReason);
+
+public sealed record HomeSectionOption(string Id, string DisplayName, bool IsVisible)
+{
+    public string VisibilityLabel => IsVisible ? "Visible" : "Hidden";
+}
+
+public sealed record HomeSectionViewModel(string Id, string DisplayName, IReadOnlyList<LibraryItem> Games);
+
+public sealed record LocalActivityItem(DateTimeOffset CreatedAt, string Message);
 
 public sealed record DuplicateReviewItem(LibraryItem Primary, LibraryItem Candidate, string Reason);
+
+public sealed class DiscoveredGameCandidate(string name, string executablePath, string workingDirectory)
+{
+    public string Name { get; } = name;
+    public string ExecutablePath { get; } = executablePath;
+    public string WorkingDirectory { get; } = workingDirectory;
+    public bool IsSelected { get; set; }
+}
 
 public sealed class LibraryWorkspaceViewModel(
     LibraryCoordinator library,
@@ -70,6 +87,7 @@ public sealed class LibraryWorkspaceViewModel(
     private string _currentPage = "Home";
     private string _selectedThemeId = themes.CurrentThemeId;
     private bool _reduceMotion = themes.ReduceMotion;
+    private bool _isControllerMode = themes.ControllerMode;
     private string _steamGridDbApiKey = string.Empty;
     private string _tailscalePeerAddress = themes.TailscalePeerAddress ?? string.Empty;
     private string _pairingCode = string.Empty;
@@ -101,6 +119,7 @@ public sealed class LibraryWorkspaceViewModel(
     private bool _duplicateReviewTruncated;
     private SaveSnapshotHistoryItem? _selectedSaveSnapshot;
     private TrustedSaveSyncPeer? _selectedTrustedPeer;
+    private TrustedSaveSyncPeer? _selectedGameSavePeer;
     private string _trustedPeerName = string.Empty;
     private string _gameTransferSourceFolder = string.Empty;
     private string _gameTransferDestination = string.Empty;
@@ -117,6 +136,25 @@ public sealed class LibraryWorkspaceViewModel(
     private double _updateProgress;
     private string? _stagedUpdatePath;
     private bool _confirmUpdateInstall;
+    private double _saveTransferProgress;
+    private string _saveTransferDevice = "No device selected";
+    private string _saveTransferDirection = "Idle";
+    private string _saveTransferFile = "No file in progress";
+    private string _saveTransferRate = "0 MiB/s";
+    private string _saveTransferEta = "—";
+    private SynchronizationContext? _uiContext;
+    private bool _saveTransferProgressSubscribed;
+    private CancellationTokenSource? _saveTransferCancellation;
+    private bool _confirmCancelSavePartials;
+    private HomeSectionOption? _selectedHomeSection;
+    private readonly List<string> _homeSectionOrder = ["Highlights", "RecentlyPlayed", "MostPlayed"];
+    private readonly HashSet<string> _hiddenHomeSections = [];
+    private bool _isActivityCenterOpen;
+    private GameLaunchAction? _selectedLaunchAction;
+    private string _launchActionLabel = string.Empty;
+    private string _launchActionTarget = string.Empty;
+    private string _launchActionArguments = string.Empty;
+    private string _launchActionWorkingDirectory = string.Empty;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -142,9 +180,39 @@ public sealed class LibraryWorkspaceViewModel(
     public ObservableCollection<ArtworkCandidate> ArtworkVariants { get; } = [];
     public ObservableCollection<SaveSnapshotHistoryItem> SaveSnapshotHistory { get; } = [];
     public ObservableCollection<SaveRestoreHistoryItem> SaveRestoreHistory { get; } = [];
+    public ObservableCollection<SaveConflictComparisonItem> SaveConflictComparison { get; } = [];
     public ObservableCollection<TrustedSaveSyncPeer> TrustedSaveSyncPeers { get; } = [];
+    public ObservableCollection<TrustedSaveSyncPeer> SelectedGameSavePeers { get; } = [];
     public ObservableCollection<PeerGameTransferOffer> PeerGameTransferOffers { get; } = [];
     public ObservableCollection<GameTransferAuditItem> GameTransferHistory { get; } = [];
+    public ObservableCollection<HomeSectionOption> HomeSectionOptions { get; } = [];
+    public ObservableCollection<HomeSectionViewModel> VisibleHomeSections { get; } = [];
+    public ObservableCollection<LocalActivityItem> ActivityItems { get; } = [];
+    public ObservableCollection<GameLaunchAction> LaunchActions { get; } = [];
+    public ObservableCollection<DiscoveredGameCandidate> DiscoveredGames { get; } = [];
+    public bool HasDiscoveredGames => DiscoveredGames.Count > 0;
+
+    public GameLaunchAction? SelectedLaunchAction
+    {
+        get => _selectedLaunchAction;
+        set
+        {
+            if (!Set(ref _selectedLaunchAction, value)) return;
+            LaunchActionLabel = value?.Label ?? string.Empty;
+            LaunchActionTarget = value?.Target.Target ?? string.Empty;
+            LaunchActionArguments = value is null ? string.Empty : string.Join(Environment.NewLine, value.Target.Arguments);
+            LaunchActionWorkingDirectory = value?.Target.WorkingDirectory ?? string.Empty;
+            OnPropertyChanged(nameof(LaunchActionSaveButtonText));
+        }
+    }
+    public string LaunchActionLabel { get => _launchActionLabel; set => Set(ref _launchActionLabel, value); }
+    public string LaunchActionTarget { get => _launchActionTarget; set => Set(ref _launchActionTarget, value); }
+    public string LaunchActionArguments { get => _launchActionArguments; set => Set(ref _launchActionArguments, value); }
+    public string LaunchActionWorkingDirectory { get => _launchActionWorkingDirectory; set => Set(ref _launchActionWorkingDirectory, value); }
+    public string LaunchActionSaveButtonText => SelectedLaunchAction is null ? "Add launch action" : "Save launch action";
+    public bool HasLaunchActions => LaunchActions.Count > 0;
+
+    public HomeSectionOption? SelectedHomeSection { get => _selectedHomeSection; set => Set(ref _selectedHomeSection, value); }
 
     public string GameTransferSourceFolder
     {
@@ -180,12 +248,14 @@ public sealed class LibraryWorkspaceViewModel(
     }
     public bool HasGameTransferPreview => GameTransferPreview?.Accepted == true;
     public bool CanAuthorizeGameTransfer => HasGameTransferPreview && GameTransferRightsAttested && SelectedTrustedPeer?.State == TrustedPeerState.Active;
-    public string GameTransferAuthorizationHint => !HasGameTransferPreview
+    public string GameTransferAuthorizationHint => GameTransferPreview is null
         ? "Choose a folder to scan every regular file in it and its subfolders."
+        : !GameTransferPreview.Accepted
+            ? $"Folder scan blocked: {GameTransferPreview.Error ?? "The selected folder could not be validated."}"
         : SelectedTrustedPeer?.State != TrustedPeerState.Active
             ? "Select one active trusted recipient."
             : !GameTransferRightsAttested
-                ? "Confirm that you are authorized to copy this DRM-free folder."
+                ? "Confirm that you own or are authorized to copy this game folder."
                 : "Ready to authorize this reviewed folder for 24 hours.";
     public PeerGameTransferOffer? SelectedGameTransferOffer { get => _selectedGameTransferOffer; set => Set(ref _selectedGameTransferOffer, value); }
     public string GameTransferStatus { get => _gameTransferStatus; private set => Set(ref _gameTransferStatus, value); }
@@ -220,6 +290,10 @@ public sealed class LibraryWorkspaceViewModel(
 
     public string TrustedPeerName { get => _trustedPeerName; set => Set(ref _trustedPeerName, value); }
     public bool HasSelectedTrustedPeer => SelectedTrustedPeer is not null;
+    public TrustedSaveSyncPeer? SelectedGameSavePeer { get => _selectedGameSavePeer; set => Set(ref _selectedGameSavePeer, value); }
+    public string SaveSyncDestinationSummary => SelectedGame?.SaveSyncPeerIds is { Count: > 0 } ids
+        ? $"Synchronize with {ids.Count} selected trusted device(s)."
+        : "Synchronize with all active trusted devices.";
 
     public SaveSnapshotHistoryItem? SelectedSaveSnapshot
     {
@@ -228,6 +302,7 @@ public sealed class LibraryWorkspaceViewModel(
     }
 
     public bool CanRestoreSelectedSnapshot => SelectedGame is not null && SelectedSaveSnapshot?.IntegrityValid == true;
+    public bool HasSaveConflictComparison => SaveConflictComparison.Count > 0;
 
     public IReadOnlyList<string> SortOptions { get; } = ["Name", "Recently played", "Date added", "Playtime", "Release date", "Platform", "Recently updated"];
 
@@ -247,6 +322,16 @@ public sealed class LibraryWorkspaceViewModel(
     public string SelectedThemeId { get => _selectedThemeId; set => Set(ref _selectedThemeId, value); }
 
     public bool ReduceMotion { get => _reduceMotion; set => Set(ref _reduceMotion, value); }
+    public bool IsControllerMode
+    {
+        get => _isControllerMode;
+        private set
+        {
+            if (!Set(ref _isControllerMode, value)) return;
+            OnPropertyChanged(nameof(IsStandardMode));
+        }
+    }
+    public bool IsStandardMode => !IsControllerMode;
 
     public string SteamGridDbApiKey { get => _steamGridDbApiKey; set => Set(ref _steamGridDbApiKey, value); }
 
@@ -277,6 +362,13 @@ public sealed class LibraryWorkspaceViewModel(
 
     public string ActiveSaveTransfer { get => _activeSaveTransfer; private set => Set(ref _activeSaveTransfer, value); }
     public bool IsSaveTransferActive { get => _isSaveTransferActive; private set => Set(ref _isSaveTransferActive, value); }
+    public double SaveTransferProgress { get => _saveTransferProgress; private set => Set(ref _saveTransferProgress, value); }
+    public string SaveTransferDevice { get => _saveTransferDevice; private set => Set(ref _saveTransferDevice, value); }
+    public string SaveTransferDirection { get => _saveTransferDirection; private set => Set(ref _saveTransferDirection, value); }
+    public string SaveTransferFile { get => _saveTransferFile; private set => Set(ref _saveTransferFile, value); }
+    public string SaveTransferRate { get => _saveTransferRate; private set => Set(ref _saveTransferRate, value); }
+    public string SaveTransferEta { get => _saveTransferEta; private set => Set(ref _saveTransferEta, value); }
+    public string CancelSaveTransferButtonText => _confirmCancelSavePartials ? "Confirm cancel partial data" : "Cancel partial data";
     public bool ShowInitialSaveUploadPrompt { get => _showInitialSaveUploadPrompt; private set => Set(ref _showInitialSaveUploadPrompt, value); }
 
     public string SaveSyncIdentity => saveSync is null ? "Unavailable" : $"{saveSync.Settings.DeviceName} · {saveSync.Settings.DeviceId:N}";
@@ -608,6 +700,12 @@ public sealed class LibraryWorkspaceViewModel(
                 OnPropertyChanged(nameof(SelectedGameReleaseDate));
                 OnPropertyChanged(nameof(SelectedGameDevelopers));
                 OnPropertyChanged(nameof(SelectedGamePublishers));
+                OnPropertyChanged(nameof(SelectedGameGenres));
+                OnPropertyChanged(nameof(SelectedGameLastPlayed));
+                OnPropertyChanged(nameof(SelectedGameLaunchTarget));
+                OnPropertyChanged(nameof(SelectedGameLaunchArguments));
+                OnPropertyChanged(nameof(SelectedGameWorkingDirectory));
+                OnPropertyChanged(nameof(SelectedGameFavoriteLabel));
                 OnPropertyChanged(nameof(SelectedGameDescription));
                 OnPropertyChanged(nameof(CanRunAsAdministrator));
                 OnPropertyChanged(nameof(RunSelectedAsAdministrator));
@@ -620,6 +718,8 @@ public sealed class LibraryWorkspaceViewModel(
                 OnPropertyChanged(nameof(CanBrowseProviderArtwork));
                 OnPropertyChanged(nameof(LinkedIdentitySummary));
                 OnPropertyChanged(nameof(CanRestoreSelectedSnapshot));
+                RefreshSelectedGameSavePeers();
+                RefreshLaunchActions();
             }
         }
     }
@@ -735,7 +835,30 @@ public sealed class LibraryWorkspaceViewModel(
         }
     }
 
-    public string Status { get => _status; private set => Set(ref _status, value); }
+    public string Status
+    {
+        get => _status;
+        private set
+        {
+            if (!Set(ref _status, value) || string.IsNullOrWhiteSpace(value)) return;
+            ActivityItems.Insert(0, new(DateTimeOffset.Now, value));
+            while (ActivityItems.Count > 50) ActivityItems.RemoveAt(ActivityItems.Count - 1);
+            OnPropertyChanged(nameof(HasActivityItems));
+        }
+    }
+
+    public bool IsActivityCenterOpen { get => _isActivityCenterOpen; private set => Set(ref _isActivityCenterOpen, value); }
+
+    public bool HasActivityItems => ActivityItems.Count > 0;
+
+    public void ToggleActivityCenter() => IsActivityCenterOpen = !IsActivityCenterOpen;
+
+    public void ClearActivityCenter()
+    {
+        ActivityItems.Clear();
+        IsActivityCenterOpen = false;
+        OnPropertyChanged(nameof(HasActivityItems));
+    }
 
     public bool IsBusy { get => _isBusy; private set => Set(ref _isBusy, value); }
 
@@ -756,6 +879,10 @@ public sealed class LibraryWorkspaceViewModel(
     public bool HasContinuePlayingGames => ContinuePlayingGames.Count > 0;
 
     public bool HasMostPlayedGames => MostPlayedGames.Count > 0;
+
+    public bool HasVisibleHomeSections => VisibleHomeSections.Count > 0;
+
+    public bool HasSaveSyncActivities => SaveSyncActivities.Count > 0;
 
     public int LibraryGameCount => library.Games.Count;
 
@@ -789,7 +916,18 @@ public sealed class LibraryWorkspaceViewModel(
 
     public string SelectedGamePublishers => JoinMetadata(SelectedGame?.Metadata.Publishers?.Value, "Unknown publisher");
 
+    public string SelectedGameGenres => JoinMetadata(SelectedGame?.Metadata.Genres?.Value, "Genres not available");
+
     public string SelectedGameReleaseDate => SelectedGame?.Metadata.ReleaseDate?.Value.ToString("MMMM d, yyyy", System.Globalization.CultureInfo.CurrentCulture) ?? "Unknown release date";
+
+    public string SelectedGameLastPlayed => SelectedGame?.LastPlayedAtUtc?.ToLocalTime().ToString("MMMM d, yyyy 'at' h:mm tt", System.Globalization.CultureInfo.CurrentCulture) ?? "Not played through NovaLauncher yet";
+    public string SelectedGameLaunchTarget => SelectedGame?.LaunchTarget.Target ?? "No launch target";
+    public string SelectedGameLaunchArguments => SelectedGame?.LaunchTarget.Arguments.Count > 0
+        ? string.Join(" ", SelectedGame.LaunchTarget.Arguments.Select(static argument => argument.Contains(' ') ? $"\"{argument}\"" : argument))
+        : "No custom arguments";
+    public string SelectedGameWorkingDirectory => SelectedGame?.LaunchTarget.WorkingDirectory ?? "Executable folder";
+
+    public string SelectedGameFavoriteLabel => SelectedGame?.IsFavorite == true ? "★  Favorited" : "☆  Add favorite";
 
     public string EditorTitle => SelectedGame is null ? "Add a manual game" : "Edit selected game";
 
@@ -805,13 +943,22 @@ public sealed class LibraryWorkspaceViewModel(
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
+        _uiContext ??= SynchronizationContext.Current;
+        if (!_saveTransferProgressSubscribed && saveSync is not null)
+        {
+            saveSync.TransferProgressChanged += OnSaveTransferProgress;
+            _saveTransferProgressSubscribed = true;
+        }
         await RunBusyAsync(async () =>
         {
             var themeWarning = await themes.InitializeAsync(cancellationToken);
+            IsControllerMode = themes.ControllerMode;
             ApplyLibraryPreferences(themes.LibraryPreferences);
+            ApplyHomePreferences(themes.HomePreferences);
             var gameLoad = await library.LoadAsync(cancellationToken);
             var collectionLoad = await collections.LoadAsync(cancellationToken);
             var syncWarning = saveSync is null ? null : await saveSync.InitializeAsync(cancellationToken);
+            RefreshSaveSyncPairingState();
             if (saveSync?.Settings.PeerAddress is { } peer)
             {
                 TailscalePeerAddress = peer;
@@ -819,6 +966,7 @@ public sealed class LibraryWorkspaceViewModel(
                 OnPropertyChanged(nameof(SaveSyncPairingStatus));
             }
             RefreshGames();
+            RefreshSaveSyncActivities();
             RefreshCollections();
             Status = gameLoad.Status switch
             {
@@ -1085,7 +1233,11 @@ public sealed class LibraryWorkspaceViewModel(
         }
     }
 
-    public async Task LaunchSelectedAsync(CancellationToken cancellationToken)
+    public Task LaunchSelectedAsync(CancellationToken cancellationToken) => LaunchSelectedTargetAsync(null, cancellationToken);
+
+    public Task LaunchSelectedActionAsync(GameLaunchAction action, CancellationToken cancellationToken) => LaunchSelectedTargetAsync(action, cancellationToken);
+
+    private async Task LaunchSelectedTargetAsync(GameLaunchAction? action, CancellationToken cancellationToken)
     {
         if (SelectedGame is null)
         {
@@ -1104,17 +1256,124 @@ public sealed class LibraryWorkspaceViewModel(
             if (pull.Status is SaveSyncStatus.Conflict or SaveSyncStatus.Failed)
             {
                 Status = pull.Message;
+                if (pull.Status == SaveSyncStatus.Conflict) await RefreshSaveConflictComparisonAsync(cancellationToken);
                 return;
             }
             Status = pull.Message;
         }
         var startedAt = DateTimeOffset.UtcNow;
-        var result = await launcher.LaunchAsync(selected.LaunchTarget, selected.RunAsAdministrator, cancellationToken);
+        var target = action?.Target ?? selected.LaunchTarget;
+        var result = await launcher.LaunchAsync(target, selected.RunAsAdministrator, cancellationToken);
         Status = result.Status == GameLaunchStatus.Started
-            ? selected.RunAsAdministrator ? "Game started after Windows administrator approval." : "Game started."
+            ? selected.RunAsAdministrator ? $"{action?.Label ?? "Game"} started after Windows administrator approval." : $"{action?.Label ?? "Game"} started."
             : result.Error ?? "Launch failed.";
-        if (result.Status == GameLaunchStatus.Started && result.ProcessId is { } processId && selected.LaunchTarget.Kind == LaunchTargetKind.Executable)
+        if (result.Status == GameLaunchStatus.Started && result.ProcessId is { } processId && target.Kind == LaunchTargetKind.Executable)
             _ = TrackPlaySessionAsync(selected.Id, processId, startedAt, cancellationToken);
+    }
+
+    public void BeginNewLaunchAction()
+    {
+        SelectedLaunchAction = null;
+        LaunchActionLabel = string.Empty;
+        LaunchActionTarget = string.Empty;
+        LaunchActionArguments = string.Empty;
+        LaunchActionWorkingDirectory = SelectedGame?.LaunchTarget.WorkingDirectory ?? string.Empty;
+        Status = "Enter a name and direct executable path for the additional action.";
+    }
+
+    public async Task ScanGameFolderAsync(string root, CancellationToken cancellationToken)
+    {
+        DiscoveredGames.Clear();
+        OnPropertyChanged(nameof(HasDiscoveredGames));
+        if (string.IsNullOrWhiteSpace(root) || !Path.IsPathFullyQualified(root) || !Directory.Exists(root))
+        { Status = "Choose an existing folder to scan."; return; }
+        Status = "Scanning the selected folder for executable candidates…";
+        try
+        {
+            var known = Games.Where(static game => game.LaunchTarget.Kind == LaunchTargetKind.Executable)
+                .Select(static game => Path.GetFullPath(game.LaunchTarget.Target))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var paths = await Task.Run(() => Directory.EnumerateFiles(root, "*.exe", new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.System,
+                MaxRecursionDepth = 12,
+            })
+                .Where(path => !known.Contains(Path.GetFullPath(path)))
+                .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                .Take(501)
+                .ToArray(), cancellationToken);
+            foreach (var path in paths.Take(500))
+            {
+                var directory = Path.GetDirectoryName(path)!;
+                var fileName = Path.GetFileNameWithoutExtension(path);
+                var name = string.Equals(fileName, "game", StringComparison.OrdinalIgnoreCase) ? Path.GetFileName(directory) : fileName;
+                DiscoveredGames.Add(new(name, path, directory));
+            }
+            OnPropertyChanged(nameof(HasDiscoveredGames));
+            Status = paths.Length > 500
+                ? "Showing the first 500 executable candidates. Select only game launchers you recognize."
+                : $"Found {paths.Length} new executable candidate(s). Select the games you want to import.";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        { Status = $"Folder discovery stopped safely: {exception.Message}"; }
+    }
+
+    public async Task ImportSelectedDiscoveredGamesAsync(CancellationToken cancellationToken)
+    {
+        var selected = DiscoveredGames.Where(static candidate => candidate.IsSelected).ToArray();
+        if (selected.Length == 0) { Status = "Select at least one reviewed candidate to import."; return; }
+        var imported = 0;
+        var failures = new List<string>();
+        foreach (var candidate in selected)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await library.AddManualGameAsync(new(candidate.Name, "Windows", candidate.ExecutablePath, [], candidate.WorkingDirectory, LaunchTargetKind.Executable), cancellationToken);
+            if (result.Status == LibraryMutationStatus.Saved) imported++;
+            else failures.Add($"{candidate.Name}: {result.Error ?? string.Join(" ", result.Errors.Values)}");
+        }
+        RefreshGames();
+        foreach (var candidate in selected.Where(candidate => Games.Any(game => string.Equals(game.LaunchTarget.Target, candidate.ExecutablePath, StringComparison.OrdinalIgnoreCase)))) DiscoveredGames.Remove(candidate);
+        OnPropertyChanged(nameof(HasDiscoveredGames));
+        Status = failures.Count == 0 ? $"Imported {imported} reviewed game(s)." : $"Imported {imported}; {failures.Count} failed. {string.Join(" ", failures.Take(3))}";
+    }
+
+    public async Task SaveLaunchActionAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null) return;
+        var action = new GameLaunchAction(
+            SelectedLaunchAction?.Id ?? Guid.NewGuid(),
+            LaunchActionLabel,
+            new LaunchTarget(
+                LaunchActionTarget.Trim(),
+                LaunchActionArguments.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                string.IsNullOrWhiteSpace(LaunchActionWorkingDirectory) ? null : LaunchActionWorkingDirectory.Trim(),
+                Uri.TryCreate(LaunchActionTarget.Trim(), UriKind.Absolute, out var uri) && !uri.IsFile ? LaunchTargetKind.Uri : LaunchTargetKind.Executable));
+        var result = await library.SaveLaunchActionAsync(SelectedGame.Id, action, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved) { Status = result.Error ?? string.Join(" ", result.Errors.Values); return; }
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = $"Launch action '{action.Label.Trim()}' saved.";
+    }
+
+    public async Task RemoveSelectedLaunchActionAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null || SelectedLaunchAction is null) { Status = "Choose a launch action to remove."; return; }
+        var label = SelectedLaunchAction.Label;
+        var result = await library.RemoveLaunchActionAsync(SelectedGame.Id, SelectedLaunchAction.Id, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved) { Status = result.Error ?? "The launch action could not be removed."; return; }
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = $"Launch action '{label}' removed. No installed files were changed.";
+    }
+
+    private void RefreshLaunchActions()
+    {
+        LaunchActions.Clear();
+        foreach (var action in SelectedGame?.LaunchActions ?? []) LaunchActions.Add(action);
+        SelectedLaunchAction = null;
+        OnPropertyChanged(nameof(HasLaunchActions));
     }
 
     public Task RefreshSelectedMetadataAsync(CancellationToken cancellationToken) =>
@@ -1426,6 +1685,7 @@ public sealed class LibraryWorkspaceViewModel(
             foreach (var peer in saveSync.Settings.EffectiveTrustedPeers.OrderBy(static peer => peer.DisplayName, StringComparer.OrdinalIgnoreCase))
                 TrustedSaveSyncPeers.Add(peer);
         SelectedTrustedPeer = selectedId is { } id ? TrustedSaveSyncPeers.FirstOrDefault(peer => peer.DeviceId == id) : null;
+        RefreshSelectedGameSavePeers();
         OnPropertyChanged(nameof(SaveSyncPairingStatus));
         OnPropertyChanged(nameof(IsSaveSyncPaired));
         OnPropertyChanged(nameof(IsSaveSyncNotPaired));
@@ -1469,16 +1729,24 @@ public sealed class LibraryWorkspaceViewModel(
         { Status = "Choose an existing save folder before synchronizing."; return; }
         if (saveSync is null) { Status = "Save sync is unavailable."; return; }
         ShowInitialSaveUploadPrompt = false;
+        if (IsSaveTransferActive) { Status = "A save transfer is already running."; return; }
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _saveTransferCancellation = operation;
         IsSaveTransferActive = true;
         ActiveSaveTransfer = $"Scanning and uploading existing saves for {SelectedGame.Name}…";
         try
         {
-            var sync = await saveSync.SnapshotAndPushAfterExitAsync(SelectedGame, cancellationToken);
+            var sync = await saveSync.SnapshotAndPushAfterExitAsync(SelectedGame, operation.Token);
             ActiveSaveTransfer = sync.Message;
             Status = sync.Message;
             RefreshSaveSyncActivities();
         }
-        finally { IsSaveTransferActive = false; }
+        catch (OperationCanceledException) when (operation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            ActiveSaveTransfer = "Paused. Durable partial data was retained; Retry resumes from the acknowledged byte offset.";
+            Status = ActiveSaveTransfer;
+        }
+        finally { if (ReferenceEquals(_saveTransferCancellation, operation)) _saveTransferCancellation = null; IsSaveTransferActive = false; }
     }
 
     public async Task GenerateSaveSyncLinkAsync(CancellationToken cancellationToken)
@@ -1518,7 +1786,7 @@ public sealed class LibraryWorkspaceViewModel(
     public void RefreshSaveSyncActivities()
     {
         SaveSyncActivities.Clear();
-        if (saveSync is null) return;
+        if (saveSync is null) { OnPropertyChanged(nameof(HasSaveSyncActivities)); return; }
         foreach (var state in saveSync.Settings.Games)
         {
             var game = Games.FirstOrDefault(candidate =>
@@ -1527,24 +1795,151 @@ public sealed class LibraryWorkspaceViewModel(
                 game?.Name ?? $"Linked game {state.GameId.Value:N}",
                 state.Status,
                 state.HeadSnapshotId?.ToString("N") ?? "No snapshot",
-                state.LastObservedFiles.Count));
+                state.LastObservedFiles.Count,
+                state.LastSuccessAtUtc?.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture) ?? "Not yet",
+                state.LastError ?? "None"));
         }
+        OnPropertyChanged(nameof(HasSaveSyncActivities));
+    }
+
+    public async Task SetControllerModeAsync(bool enabled, CancellationToken cancellationToken)
+    {
+        var error = await themes.ConfigureControllerModeAsync(enabled, cancellationToken);
+        if (error is not null) { Status = error; return; }
+        IsControllerMode = enabled;
+        Status = enabled
+            ? "Controller mode enabled. Use directional navigation and Enter/A to choose; Escape/B exits."
+            : "Controller mode exited.";
+    }
+
+    public Task ToggleControllerModeAsync(CancellationToken cancellationToken) => SetControllerModeAsync(!IsControllerMode, cancellationToken);
+
+    public async Task RotateSelectedTrustedPeerCredentialAsync(CancellationToken cancellationToken)
+    {
+        if (saveSync is null || SelectedTrustedPeer is null) { Status = "Choose an active trusted device first."; return; }
+        var error = await saveSync.RotatePeerCredentialAsync(SelectedTrustedPeer.DeviceId, cancellationToken);
+        Status = error ?? $"Credential rotated for {SelectedTrustedPeer.DisplayName}. Both devices now use the new independently stored secret.";
+        RefreshSaveSyncPairingState();
+    }
+
+    public async Task AddSelectedSaveDestinationAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null || SelectedGameSavePeer is not { State: TrustedPeerState.Active } peer) { Status = "Choose an active trusted destination first."; return; }
+        var ids = (SelectedGame.SaveSyncPeerIds ?? []).Append(peer.DeviceId).Distinct().ToArray();
+        var result = await library.SetSaveSyncPeersAsync(SelectedGame.Id, ids, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved) { Status = result.Error ?? "The save destination could not be saved."; return; }
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = "The selected trusted device was added to this game's save destinations.";
+    }
+
+    public async Task UseAllSaveDestinationsAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null) return;
+        var result = await library.SetSaveSyncPeersAsync(SelectedGame.Id, null, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved) { Status = result.Error ?? "The save destination policy could not be saved."; return; }
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = "This game will synchronize with every active trusted device.";
+    }
+
+    public async Task RemoveSelectedSaveDestinationAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null || SelectedGameSavePeer is null) { Status = "Choose a selected destination to remove."; return; }
+        var ids = (SelectedGame.SaveSyncPeerIds ?? []).Where(id => id != SelectedGameSavePeer.DeviceId).ToArray();
+        var result = await library.SetSaveSyncPeersAsync(SelectedGame.Id, ids, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved) { Status = result.Error ?? "The save destination could not be removed."; return; }
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = ids.Length == 0 ? "No explicit destinations remain; all active trusted devices will be used." : "The trusted device was removed from this game's destinations.";
+    }
+
+    private void RefreshSelectedGameSavePeers()
+    {
+        SelectedGameSavePeers.Clear();
+        if (SelectedGame?.SaveSyncPeerIds is { Count: > 0 } ids)
+            foreach (var peer in TrustedSaveSyncPeers.Where(peer => ids.Contains(peer.DeviceId))) SelectedGameSavePeers.Add(peer);
+        OnPropertyChanged(nameof(SaveSyncDestinationSummary));
+    }
+
+    private void OnSaveTransferProgress(SaveTransferProgress progress)
+    {
+        if (_uiContext is { } context) context.Post(static state =>
+        {
+            var (workspace, update) = ((LibraryWorkspaceViewModel, SaveTransferProgress))state!;
+            workspace.ApplySaveTransferProgress(update);
+        }, (this, progress));
+        else ApplySaveTransferProgress(progress);
+    }
+
+    private void ApplySaveTransferProgress(SaveTransferProgress progress)
+    {
+        SaveTransferDevice = progress.DeviceName;
+        SaveTransferDirection = progress.Direction;
+        SaveTransferFile = progress.FilePath;
+        SaveTransferProgress = progress.TotalBytes <= 0 ? 0 : Math.Clamp(progress.BytesTransferred * 100d / progress.TotalBytes, 0, 100);
+        SaveTransferRate = $"{progress.BytesPerSecond / 1024d / 1024d:F1} MiB/s";
+        SaveTransferEta = progress.EstimatedRemaining is { } eta ? eta.ToString(@"mm\:ss", System.Globalization.CultureInfo.InvariantCulture) : "—";
+        ActiveSaveTransfer = $"{progress.Status} · {progress.BytesTransferred:N0}/{progress.TotalBytes:N0} bytes";
+        IsSaveTransferActive = !progress.Status.StartsWith("Completed", StringComparison.OrdinalIgnoreCase) && !progress.Status.StartsWith("Paused", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task RetryPendingSaveUploadsAsync(CancellationToken cancellationToken)
     {
         if (saveSync is null) { ActiveSaveTransfer = "Save sync is unavailable."; return; }
+        if (IsSaveTransferActive) { Status = "A save transfer is already running."; return; }
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _saveTransferCancellation = operation;
         IsSaveTransferActive = true;
         ActiveSaveTransfer = "Retrying queued save snapshots…";
         try
         {
-            var count = await saveSync.RetryPendingUploadsAsync(cancellationToken);
+            var count = await saveSync.RetryPendingUploadsAsync(operation.Token);
             ActiveSaveTransfer = count == 0
                 ? "No queued snapshot was acknowledged. The peer may be offline, or there may be nothing pending."
                 : $"The peer acknowledged {count} queued snapshot(s).";
             RefreshSaveSyncActivities();
         }
-        finally { IsSaveTransferActive = false; }
+        catch (OperationCanceledException) when (operation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            ActiveSaveTransfer = "Paused. Retry resumes from the acknowledged byte offset.";
+            Status = ActiveSaveTransfer;
+        }
+        finally { if (ReferenceEquals(_saveTransferCancellation, operation)) _saveTransferCancellation = null; IsSaveTransferActive = false; }
+    }
+
+    public void PauseSaveTransfer()
+    {
+        if (_saveTransferCancellation is null || !IsSaveTransferActive) { Status = "No active save transfer can be paused."; return; }
+        _saveTransferCancellation.Cancel();
+        ActiveSaveTransfer = "Pausing after the current authenticated chunk…";
+        Status = ActiveSaveTransfer;
+    }
+
+    public async Task CancelPartialSaveTransfersAsync(CancellationToken cancellationToken)
+    {
+        if (saveSync is null) { Status = "Save sync is unavailable."; return; }
+        if (!_confirmCancelSavePartials)
+        {
+            _confirmCancelSavePartials = true;
+            if (IsSaveTransferActive) PauseSaveTransfer();
+            Status = "Cancel removes only unverified managed partial chunks on this device and reachable peers. Live saves, conflicts, backups, and verified snapshots are preserved. Select confirm after the active chunk stops.";
+            OnPropertyChanged(nameof(CancelSaveTransferButtonText));
+            return;
+        }
+        if (IsSaveTransferActive) { Status = "Wait for the active chunk to stop before confirming cancellation."; return; }
+        var error = await saveSync.CancelPartialTransfersAsync(cancellationToken);
+        _confirmCancelSavePartials = false;
+        OnPropertyChanged(nameof(CancelSaveTransferButtonText));
+        if (error is not null) { Status = error; ActiveSaveTransfer = error; return; }
+        SaveTransferProgress = 0;
+        SaveTransferDevice = "No device selected";
+        SaveTransferDirection = "Idle";
+        SaveTransferFile = "No file in progress";
+        SaveTransferRate = "0 MiB/s";
+        SaveTransferEta = "—";
+        ActiveSaveTransfer = "Unverified partial save-transfer data was cancelled. Live saves and verified history were not changed.";
+        Status = ActiveSaveTransfer;
     }
 
     public async Task RefreshSelectedSnapshotHistoryAsync(CancellationToken cancellationToken)
@@ -1576,6 +1971,20 @@ public sealed class LibraryWorkspaceViewModel(
         if (SelectedGame is null || saveSync is null) return;
         var result = await saveSync.ResolveConflictAsync(SelectedGame, choice, cancellationToken);
         Status = result.Message;
+        if (result.Status is SaveSyncStatus.Applied or SaveSyncStatus.SnapshotCreated)
+        {
+            SaveConflictComparison.Clear();
+            OnPropertyChanged(nameof(HasSaveConflictComparison));
+        }
+    }
+
+    public async Task RefreshSaveConflictComparisonAsync(CancellationToken cancellationToken)
+    {
+        SaveConflictComparison.Clear();
+        if (SelectedGame is null || saveSync is null) { Status = "Select a conflicted game first."; OnPropertyChanged(nameof(HasSaveConflictComparison)); return; }
+        foreach (var item in await saveSync.GetConflictComparisonAsync(SelectedGame, cancellationToken)) SaveConflictComparison.Add(item);
+        OnPropertyChanged(nameof(HasSaveConflictComparison));
+        Status = SaveConflictComparison.Count == 0 ? "No retained save conflict exists for this game." : $"Compared {SaveConflictComparison.Count} local and remote save path(s). Nothing was changed.";
     }
 
     public void ApplySteamGridDbApiKey()
@@ -1965,6 +2374,7 @@ public sealed class LibraryWorkspaceViewModel(
         OnPropertyChanged(nameof(HasFeaturedGame));
         OnPropertyChanged(nameof(HasContinuePlayingGames));
         OnPropertyChanged(nameof(HasMostPlayedGames));
+        RefreshHomeSections();
         RefreshDuplicateCandidates();
         NotifyLibrarySelectionChanged();
     }
@@ -2147,6 +2557,88 @@ public sealed class LibraryWorkspaceViewModel(
         finally
         {
             _suppressLibraryPreferenceSave = false;
+        }
+    }
+
+    public async Task VerifySelectedSnapshotsAsync(CancellationToken cancellationToken)
+    {
+        if (saveSync is null || SelectedGame is null) { Status = "Select a game before checking snapshot integrity."; return; }
+        var gameId = SelectedGame.SaveSyncId is { } shared ? new GameId(shared) : SelectedGame.Id;
+        var result = await saveSync.VerifySnapshotsAsync(gameId, cancellationToken);
+        Status = result.Message;
+        await RefreshSelectedSnapshotHistoryAsync(cancellationToken);
+    }
+
+    private void ApplyHomePreferences(HomeViewPreferences preferences)
+    {
+        _homeSectionOrder.Clear();
+        _homeSectionOrder.AddRange(preferences.SectionOrder);
+        _hiddenHomeSections.Clear();
+        _hiddenHomeSections.UnionWith(preferences.HiddenSections);
+        RefreshHomeSections();
+    }
+
+    public void ToggleSelectedHomeSection()
+    {
+        if (SelectedHomeSection is null) return;
+        if (!_hiddenHomeSections.Add(SelectedHomeSection.Id)) _hiddenHomeSections.Remove(SelectedHomeSection.Id);
+        RefreshHomeSections(SelectedHomeSection.Id);
+        PersistHomePreferences();
+    }
+
+    public void MoveSelectedHomeSection(int direction)
+    {
+        if (SelectedHomeSection is null || direction is not (-1 or 1)) return;
+        var index = _homeSectionOrder.IndexOf(SelectedHomeSection.Id);
+        var target = index + direction;
+        if (index < 0 || target < 0 || target >= _homeSectionOrder.Count) return;
+        (_homeSectionOrder[index], _homeSectionOrder[target]) = (_homeSectionOrder[target], _homeSectionOrder[index]);
+        RefreshHomeSections(SelectedHomeSection.Id);
+        PersistHomePreferences();
+    }
+
+    private void RefreshHomeSections(string? selectedId = null)
+    {
+        selectedId ??= SelectedHomeSection?.Id;
+        HomeSectionOptions.Clear();
+        VisibleHomeSections.Clear();
+        foreach (var id in _homeSectionOrder)
+        {
+            var displayName = id switch
+            {
+                "Highlights" => "Highlights",
+                "RecentlyPlayed" => "Recently played",
+                "MostPlayed" => "Most played",
+                _ => id,
+            };
+            var visible = !_hiddenHomeSections.Contains(id);
+            HomeSectionOptions.Add(new(id, displayName, visible));
+            if (!visible) continue;
+            IReadOnlyList<LibraryItem> games = id switch
+            {
+                "Highlights" => HomeGames,
+                "RecentlyPlayed" => ContinuePlayingGames,
+                "MostPlayed" => MostPlayedGames,
+                _ => Array.Empty<LibraryItem>(),
+            };
+            if (games.Count > 0) VisibleHomeSections.Add(new(id, displayName, games));
+        }
+        SelectedHomeSection = HomeSectionOptions.FirstOrDefault(item => item.Id == selectedId);
+        OnPropertyChanged(nameof(HasVisibleHomeSections));
+    }
+
+    private async void PersistHomePreferences()
+    {
+        try
+        {
+            var error = await themes.SaveHomePreferencesAsync(
+                new(_homeSectionOrder.ToArray(), _hiddenHomeSections.ToHashSet(StringComparer.Ordinal)),
+                CancellationToken.None);
+            Status = error ?? "Home layout saved locally.";
+        }
+        catch (Exception exception)
+        {
+            Status = $"Home layout could not be saved: {exception.Message}";
         }
     }
 

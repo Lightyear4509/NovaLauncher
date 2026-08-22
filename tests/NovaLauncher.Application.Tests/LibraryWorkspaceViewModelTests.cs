@@ -5,7 +5,9 @@ using NovaLauncher.Application.Steam;
 using NovaLauncher.Application.Enrichment;
 using NovaLauncher.Application.Achievements;
 using NovaLauncher.Application.Themes;
+using NovaLauncher.Application.SaveSync;
 using NovaLauncher.Domain.Library;
+using NovaLauncher.Domain.SaveSync;
 
 namespace NovaLauncher.Application.Tests;
 
@@ -62,6 +64,22 @@ public sealed class LibraryWorkspaceViewModelTests
 
         Assert.False(fixture.Workspace.IsEmpty);
         Assert.Equal("Game", Assert.Single(fixture.Workspace.Games).Name);
+    }
+
+    [Fact]
+    public async Task StartupHydratesPersistedTrustedPeersForGameTransferSelection()
+    {
+        var peers = new[]
+        {
+            new TrustedSaveSyncPeer(Guid.NewGuid(), "Desktop", "100.64.0.2", "test/desktop", TrustedPeerState.Active, DateTimeOffset.UtcNow),
+            new TrustedSaveSyncPeer(Guid.NewGuid(), "Laptop", "100.64.0.3", "test/laptop", TrustedPeerState.Active, DateTimeOffset.UtcNow),
+        };
+        using var fixture = new WorkspaceFixture(saveSync: new FakeSaveSync(peers));
+
+        await fixture.Workspace.InitializeAsync(CancellationToken.None);
+
+        Assert.Equal(2, fixture.Workspace.TrustedSaveSyncPeers.Count);
+        Assert.All(fixture.Workspace.TrustedSaveSyncPeers, peer => Assert.Equal(TrustedPeerState.Active, peer.State));
     }
 
     [Fact]
@@ -462,7 +480,7 @@ public sealed class LibraryWorkspaceViewModelTests
         private readonly LibraryCoordinator _library;
         private readonly CollectionCoordinator _collections;
 
-        public WorkspaceFixture(IReadOnlyList<LibraryItem>? initialGames = null)
+        public WorkspaceFixture(IReadOnlyList<LibraryItem>? initialGames = null, ISaveSyncService? saveSync = null)
         {
             _library = new LibraryCoordinator(
                 new MemoryStore<GamesDocument>(initialGames is null ? null : new GamesDocument(GamesDocument.CurrentSchemaVersion, initialGames)),
@@ -480,7 +498,8 @@ public sealed class LibraryWorkspaceViewModelTests
                 new SteamImportCoordinator(SteamSource, _library),
                 Enrichment = new FakeEnrichment(),
                 new FakeAchievements(),
-                new FakeThemes());
+                new FakeThemes(),
+                saveSync: saveSync);
         }
 
         public LibraryWorkspaceViewModel Workspace { get; }
@@ -541,7 +560,9 @@ public sealed class LibraryWorkspaceViewModelTests
         public IReadOnlyList<ThemeOption> Themes { get; } = [new("nova-dark", "Nova Dark")];
         public string CurrentThemeId => "nova-dark";
         public bool ReduceMotion { get; private set; }
+        public bool ControllerMode { get; private set; }
         public LibraryViewPreferences LibraryPreferences { get; private set; } = new("Grid", "Medium", "Name", "All sources", "All platforms", "All games", false);
+        public HomeViewPreferences HomePreferences { get; private set; } = new(["Highlights", "RecentlyPlayed", "MostPlayed"], new HashSet<string>(StringComparer.Ordinal));
         public string? TailscalePeerAddress => null;
         public string UpdateChannel { get; private set; } = "Stable";
         public Task<string?> InitializeAsync(CancellationToken cancellationToken) => Task.FromResult<string?>(null);
@@ -558,6 +579,42 @@ public sealed class LibraryWorkspaceViewModelTests
             LibraryPreferences = preferences;
             return Task.FromResult<string?>(null);
         }
+        public Task<string?> ConfigureControllerModeAsync(bool enabled, CancellationToken cancellationToken) { ControllerMode = enabled; return Task.FromResult<string?>(null); }
+        public Task<string?> SaveHomePreferencesAsync(HomeViewPreferences preferences, CancellationToken cancellationToken)
+        {
+            HomePreferences = preferences;
+            return Task.FromResult<string?>(null);
+        }
+    }
+
+    private sealed class FakeSaveSync(IReadOnlyList<TrustedSaveSyncPeer> peers) : ISaveSyncService
+    {
+        public event Action<SaveTransferProgress>? TransferProgressChanged { add { } remove { } }
+        public SaveSyncSettings Settings { get; } = new(Guid.NewGuid(), "Local", null, null, SaveSyncSettings.DefaultPort, [], TrustedPeers: peers);
+        public bool IsPaired => Settings.EffectiveTrustedPeers.Any(static peer => peer.State == TrustedPeerState.Active);
+        public bool IsListening => true;
+        public string ListenerStatus => "Listening";
+        public Task<string?> InitializeAsync(CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string> GeneratePairingCodeAsync(CancellationToken token) => Task.FromResult("123 456");
+        public Task<string?> ApplyPairingCodeAsync(string code, CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string?> RevokePeerAsync(CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string?> RenamePeerAsync(Guid id, string name, CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string?> SetPeerPausedAsync(Guid id, bool paused, CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string?> RevokePeerAsync(Guid id, CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string?> RotatePeerCredentialAsync(Guid id, CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string?> ConfigurePeerAsync(string address, CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string?> RetryListenerAsync(CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string?> CancelPartialTransfersAsync(CancellationToken token) => Task.FromResult<string?>(null);
+        public (Guid? Identity, string? Error) DeriveSharedSaveIdentity(string label, string platform) => (null, null);
+        public Task<int> RetryPendingUploadsAsync(CancellationToken token) => Task.FromResult(0);
+        public Task<SaveSyncResult> PullBeforeLaunchAsync(LibraryItem game, CancellationToken token) => Task.FromResult(new SaveSyncResult(SaveSyncStatus.Unchanged, string.Empty));
+        public Task<SaveSyncResult> SnapshotAndPushAfterExitAsync(LibraryItem game, CancellationToken token) => Task.FromResult(new SaveSyncResult(SaveSyncStatus.Unchanged, string.Empty));
+        public Task<SaveSyncResult> ResolveConflictAsync(LibraryItem game, SaveConflictChoice choice, CancellationToken token) => Task.FromResult(new SaveSyncResult(SaveSyncStatus.Unchanged, string.Empty));
+        public Task<IReadOnlyList<SaveConflictComparisonItem>> GetConflictComparisonAsync(LibraryItem game, CancellationToken token) => Task.FromResult<IReadOnlyList<SaveConflictComparisonItem>>([]);
+        public Task<IReadOnlyList<SaveSnapshotHistoryItem>> GetSnapshotHistoryAsync(GameId id, CancellationToken token) => Task.FromResult<IReadOnlyList<SaveSnapshotHistoryItem>>([]);
+        public Task<SaveSyncResult> VerifySnapshotsAsync(GameId id, CancellationToken token) => Task.FromResult(new SaveSyncResult(SaveSyncStatus.Unchanged, "Verified."));
+        public Task<SaveSyncResult> RestoreSnapshotAsync(LibraryItem game, Guid id, CancellationToken token) => Task.FromResult(new SaveSyncResult(SaveSyncStatus.Unchanged, string.Empty));
+        public Task<IReadOnlyList<SaveRestoreHistoryItem>> GetRestoreHistoryAsync(GameId id, CancellationToken token) => Task.FromResult<IReadOnlyList<SaveRestoreHistoryItem>>([]);
     }
 
     private sealed class MemoryStore<TDocument> : IDocumentStore<TDocument>

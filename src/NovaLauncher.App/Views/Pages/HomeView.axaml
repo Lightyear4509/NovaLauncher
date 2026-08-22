@@ -5,6 +5,7 @@
     xmlns:views="using:NovaLauncher.App.Views"
     xmlns:components="using:NovaLauncher.App.Views.Components"
     xmlns:domain="using:NovaLauncher.Domain.Library"
+    xmlns:library="using:NovaLauncher.Application.Library"
     xmlns:vm="using:NovaLauncher.Application"
     x:DataType="vm:MainWindowViewModel">
   <ScrollViewer HorizontalScrollBarVisibility="Disabled">
@@ -53,48 +54,33 @@
         <Border Grid.Column="2" Classes="metric-card"><StackPanel Spacing="4"><TextBlock Text="PLAYTIME" Classes="eyebrow" /><TextBlock Text="{Binding Workspace.TotalLibraryPlayTime}" Classes="metric" /><TextBlock Text="monitored locally" Classes="caption" /></StackPanel></Border>
       </Grid>
 
-      <TextBlock Text="Your games" Classes="section-title" />
-      <ItemsControl ItemsSource="{Binding Workspace.HomeGames}" AutomationProperties.Name="Home game highlights">
-        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+      <Expander Header="Customize Home" Classes="panel-expander" AutomationProperties.Name="Customize Home sections">
+        <StackPanel Margin="4,12,4,4" Spacing="10">
+          <TextBlock Text="Choose a section, then show or hide it or change its position. Your layout stays on this device." Classes="caption" TextWrapping="Wrap" />
+          <ListBox ItemsSource="{Binding Workspace.HomeSectionOptions}" SelectedItem="{Binding Workspace.SelectedHomeSection}" MaxHeight="170" AutomationProperties.Name="Home section layout">
+            <ListBox.ItemTemplate><DataTemplate x:DataType="library:HomeSectionOption"><Grid ColumnDefinitions="*,Auto" Margin="4"><TextBlock Text="{Binding DisplayName}" /><TextBlock Grid.Column="1" Text="{Binding VisibilityLabel}" Classes="eyebrow" /></Grid></DataTemplate></ListBox.ItemTemplate>
+          </ListBox>
+          <WrapPanel ItemSpacing="8"><Button Content="Show or hide" Click="OnToggleHomeSection" AutomationProperties.Name="Toggle selected Home section visibility" /><Button Content="Move up" Click="OnMoveHomeSectionUp" AutomationProperties.Name="Move selected Home section up" /><Button Content="Move down" Click="OnMoveHomeSectionDown" AutomationProperties.Name="Move selected Home section down" /></WrapPanel>
+        </StackPanel>
+      </Expander>
+
+      <Border Classes="warning-notice" IsVisible="{Binding Workspace.HasSaveSyncActivities}">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16"><StackPanel Spacing="4"><TextBlock Text="Cross-device save activity" FontWeight="SemiBold" /><TextBlock Text="Review recent snapshots, queued work, or conflicts before launching on another device." Classes="caption" TextWrapping="Wrap" /></StackPanel><Button Grid.Column="1" Content="Review saves  →" Click="OnShowSaves" AutomationProperties.Name="Review cross-device save activity" /></Grid>
+      </Border>
+
+      <ItemsControl ItemsSource="{Binding Workspace.VisibleHomeSections}" AutomationProperties.Name="Ordered Home sections">
         <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="domain:LibraryItem">
-            <Button Classes="game-tile" Width="210" Height="300" Margin="0,0,16,16" Padding="0" Click="OnOpenGameDetails" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Open highlighted game details">
-              <Grid RowDefinitions="230,*">
-                <Border Background="{DynamicResource ThemeElevated}" CornerRadius="14,14,0,0" ClipToBounds="True">
-                  <Grid>
-                    <TextBlock Text="{Binding Name}" FontWeight="Bold" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="18" />
-                    <components:ManagedArtworkImage DecodeWidth="420" Stretch="UniformToFill" AutomationProperties.Name="Highlighted game cover artwork" />
-                    <Border Background="{DynamicResource ThemeCardScrim}" VerticalAlignment="Bottom" Height="48" />
-                  </Grid>
-                </Border>
-                <StackPanel Grid.Row="1" Margin="14,9" Spacing="2">
-                  <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                  <TextBlock Text="{Binding Platform}" Classes="caption" />
-                </StackPanel>
-              </Grid>
-            </Button>
+          <DataTemplate x:DataType="library:HomeSectionViewModel">
+            <StackPanel Spacing="12" Margin="0,0,0,12">
+              <TextBlock Text="{Binding DisplayName}" Classes="section-title" />
+              <ItemsControl ItemsSource="{Binding Games}">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate><DataTemplate x:DataType="domain:LibraryItem"><Button Classes="game-tile" Width="210" Height="300" Margin="0,0,16,16" Padding="0" Click="OnOpenGameDetails" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Open Home game details"><Grid RowDefinitions="230,*"><Border Background="{DynamicResource ThemeElevated}" CornerRadius="14,14,0,0" ClipToBounds="True"><Grid><TextBlock Text="{Binding Name}" FontWeight="Bold" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="18" /><components:ManagedArtworkImage DecodeWidth="420" Stretch="UniformToFill" AutomationProperties.Name="Home game cover artwork" /></Grid></Border><StackPanel Grid.Row="1" Margin="14,9" Spacing="2"><TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /><TextBlock Text="{Binding Platform}" Classes="caption" /></StackPanel></Grid></Button></DataTemplate></ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
-
-      <Grid ColumnDefinitions="*,*" ColumnSpacing="20">
-        <Border Classes="card" IsVisible="{Binding Workspace.HasContinuePlayingGames}">
-          <StackPanel Spacing="12">
-            <TextBlock Text="Recently played" Classes="section-title" />
-            <ItemsControl ItemsSource="{Binding Workspace.ContinuePlayingGames}" AutomationProperties.Name="Recently played games">
-              <ItemsControl.ItemTemplate><DataTemplate x:DataType="domain:LibraryItem"><Button Classes="row-action" Content="{Binding Name}" Margin="0,0,0,6" Click="OnOpenGameDetails" HorizontalContentAlignment="Left" AutomationProperties.Name="Open recently played game details" /></DataTemplate></ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </StackPanel>
-        </Border>
-        <Border Grid.Column="1" Classes="card" IsVisible="{Binding Workspace.HasMostPlayedGames}">
-          <StackPanel Spacing="12">
-            <TextBlock Text="Most played" Classes="section-title" />
-            <ItemsControl ItemsSource="{Binding Workspace.MostPlayedGames}" AutomationProperties.Name="Most played games">
-              <ItemsControl.ItemTemplate><DataTemplate x:DataType="domain:LibraryItem"><Button Classes="row-action" Content="{Binding Name}" Margin="0,0,0,6" Click="OnOpenGameDetails" HorizontalContentAlignment="Left" AutomationProperties.Name="Open most played game details" /></DataTemplate></ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </StackPanel>
-        </Border>
-      </Grid>
 
       <Border Classes="empty-state" IsVisible="{Binding Workspace.IsEmpty}">
         <StackPanel HorizontalAlignment="Center" Spacing="10">

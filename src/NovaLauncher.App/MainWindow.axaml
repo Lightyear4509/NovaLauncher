@@ -4,6 +4,8 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:NovaLauncher.App"
     xmlns:pages="using:NovaLauncher.App.Views.Pages"
+    xmlns:components="using:NovaLauncher.App.Views.Components"
+    xmlns:domain="using:NovaLauncher.Domain.Library"
     xmlns:vm="using:NovaLauncher.Application"
     x:DataType="vm:MainWindowViewModel"
     Title="NovaLauncher"
@@ -15,7 +17,8 @@
     AutomationProperties.Name="{x:Static local:ShellAccessibility.MainWindow}"
     Opened="OnOpened"
     Closed="OnClosed">
-  <Grid ColumnDefinitions="Auto,*" Background="{DynamicResource ThemeBackground}">
+  <Grid Background="{DynamicResource ThemeBackground}">
+  <Grid ColumnDefinitions="Auto,*" Background="{DynamicResource ThemeBackground}" IsVisible="{Binding Workspace.IsStandardMode}">
     <Border Width="{Binding Workspace.NavigationPaneWidth}" Background="{DynamicResource ThemeSurface}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,0,1,0" Padding="12,18">
       <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto" RowSpacing="8">
         <Grid ColumnDefinitions="Auto,*" Margin="4,0,4,20">
@@ -32,11 +35,12 @@
 
     <Grid Grid.Column="1" RowDefinitions="72,*,Auto,Auto">
       <Border Background="{DynamicResource ThemeBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,0,0,1" Padding="22,12">
-        <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8">
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="8">
           <Button Classes="subtle" Content="←" Click="OnNavigateBack" IsEnabled="{Binding Workspace.CanNavigateBack}" ToolTip.Tip="Back" AutomationProperties.Name="Go to previous page" />
           <Button Grid.Column="1" Classes="subtle" Content="→" Click="OnNavigateForward" IsEnabled="{Binding Workspace.CanNavigateForward}" ToolTip.Tip="Forward" AutomationProperties.Name="Go to next page" />
           <Grid Grid.Column="2" MaxWidth="520" HorizontalAlignment="Center" IsVisible="{Binding Workspace.IsLibraryPage}"><TextBox Text="{Binding Workspace.SearchText}" PlaceholderText="Search your library" Padding="42,9,42,9" AutomationProperties.Name="Search library from top bar" /><TextBlock Text="⌕" FontSize="20" Margin="14,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" /><Button Content="×" Classes="subtle" Click="OnClearSearch" HorizontalAlignment="Right" ToolTip.Tip="Clear search" AutomationProperties.Name="Clear library search" /></Grid>
-          <Border Grid.Column="3" Classes="pill" VerticalAlignment="Center"><StackPanel Orientation="Horizontal" Spacing="8"><Ellipse Width="8" Height="8" Fill="{DynamicResource ThemeSuccess}" /><TextBlock Text="LOCAL" Classes="eyebrow" VerticalAlignment="Center" /></StackPanel></Border>
+          <Button Grid.Column="3" Classes="quiet" Content="Activity" Click="OnToggleActivityCenter" AutomationProperties.Name="Open local activity center" />
+          <Border Grid.Column="4" Classes="pill" VerticalAlignment="Center"><StackPanel Orientation="Horizontal" Spacing="8"><Ellipse Width="8" Height="8" Fill="{DynamicResource ThemeSuccess}" /><TextBlock Text="LOCAL" Classes="eyebrow" VerticalAlignment="Center" /></StackPanel></Border>
         </Grid>
       </Border>
 
@@ -46,10 +50,22 @@
         <pages:GameDetailsView IsVisible="{Binding Workspace.IsGameDetailsPage}" />
         <pages:TransfersView IsVisible="{Binding Workspace.IsSavesPage}" />
         <pages:SettingsView IsVisible="{Binding Workspace.IsSettingsPage}" />
+        <Border Classes="elevated-card" Width="390" MaxHeight="560" Margin="20" Padding="20" HorizontalAlignment="Right" VerticalAlignment="Top" IsVisible="{Binding Workspace.IsActivityCenterOpen}" ZIndex="10" AutomationProperties.Name="Local activity center">
+          <Grid RowDefinitions="Auto,*" RowSpacing="12">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8"><StackPanel><TextBlock Text="Activity" Classes="section-title" /><TextBlock Text="Recent local operations" Classes="caption" /></StackPanel><Button Grid.Column="1" Content="Clear" Click="OnClearActivityCenter" IsEnabled="{Binding Workspace.HasActivityItems}" AutomationProperties.Name="Clear local activity history" /></Grid>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><ItemsControl ItemsSource="{Binding Workspace.ActivityItems}"><ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,0,0,1" Padding="0,10"><StackPanel Spacing="4"><TextBlock Text="{Binding CreatedAt, StringFormat='{}{0:t}'}" Classes="eyebrow" /><TextBlock Text="{Binding Message}" TextWrapping="Wrap" /></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
+          </Grid>
+        </Border>
       </Grid>
 
       <Border Grid.Row="2" Classes="toast" Margin="22,8,22,12" HorizontalAlignment="Stretch"><Grid ColumnDefinitions="Auto,*" ColumnSpacing="10"><Ellipse Width="7" Height="7" Fill="{DynamicResource ThemeAccent}" VerticalAlignment="Center" /><TextBlock Grid.Column="1" Text="{Binding Workspace.Status}" TextWrapping="Wrap" AutomationProperties.Name="NovaLauncher operation status" AutomationProperties.LiveSetting="Polite" /></Grid></Border>
       <ProgressBar Grid.Row="3" IsIndeterminate="True" IsVisible="{Binding Workspace.IsBusy}" AutomationProperties.Name="NovaLauncher operation in progress" />
+    </Grid>
+  </Grid>
+    <Grid IsVisible="{Binding Workspace.IsControllerMode}" RowDefinitions="Auto,*,Auto" Margin="42" KeyboardNavigation.TabNavigation="Cycle" AutomationProperties.Name="Full screen controller library">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18"><StackPanel><TextBlock Text="NOVA CONTROLLER" Classes="eyebrow" FontSize="16" /><TextBlock Text="Choose a game" Classes="page-title" FontSize="42" /><TextBlock Text="Directional controls move focus · Enter/A launches · Escape/B or F11 exits" Classes="page-subtitle" /></StackPanel><Button x:Name="ExitControllerModeButton" Grid.Column="1" Content="Exit controller mode" Click="OnToggleControllerMode" FontSize="18" Padding="22,14" AutomationProperties.Name="Exit controller mode" /></Grid>
+      <ScrollViewer Grid.Row="1" Margin="0,28,0,18" HorizontalScrollBarVisibility="Disabled"><Grid><Border Classes="empty-state" IsVisible="{Binding Workspace.IsEmpty}" HorizontalAlignment="Stretch" VerticalAlignment="Center"><StackPanel Spacing="10"><TextBlock Text="No games yet" FontSize="30" FontWeight="Bold" HorizontalAlignment="Center" /><TextBlock Text="Exit controller mode and add or discover games from Library." Classes="page-subtitle" HorizontalAlignment="Center" /></StackPanel></Border><ItemsControl ItemsSource="{Binding Workspace.Games}" AutomationProperties.Name="Controller game library"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate x:DataType="domain:LibraryItem"><Button Width="300" Height="250" Margin="0,0,20,20" Padding="0" Click="OnControllerLaunch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Launch game in controller mode"><Grid RowDefinitions="*,Auto"><Border Background="{DynamicResource ThemeElevated}" CornerRadius="16,16,0,0" ClipToBounds="True"><Grid><TextBlock Text="{Binding Name}" FontSize="25" FontWeight="Bold" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20" /><components:ManagedArtworkImage DecodeWidth="480" Stretch="UniformToFill" /></Grid></Border><StackPanel Grid.Row="1" Margin="16,12"><TextBlock Text="{Binding Name}" FontSize="21" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /><TextBlock Text="{Binding Platform}" Classes="caption" FontSize="15" /></StackPanel></Grid></Button></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Grid></ScrollViewer>
+      <Border Grid.Row="2" Classes="toast"><TextBlock Text="{Binding Workspace.Status}" FontSize="17" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" /></Border>
     </Grid>
   </Grid>
 </Window>

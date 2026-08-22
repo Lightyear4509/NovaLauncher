@@ -76,6 +76,16 @@ public sealed partial class LibraryView : NovaPage
     private async void OnCommitSteamImport(object? sender, RoutedEventArgs e) =>
         await ExecuteAsync(() => Workspace.CommitSteamImportAsync(LifetimeToken));
 
+    private async void OnScanGameFolder(object? sender, RoutedEventArgs e)
+    {
+        var folders = await Storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose a folder to scan for games", AllowMultiple = false });
+        var path = folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path)) await ExecuteAsync(() => Workspace.ScanGameFolderAsync(path, LifetimeToken));
+    }
+
+    private async void OnImportDiscoveredGames(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => Workspace.ImportSelectedDiscoveredGamesAsync(LifetimeToken));
+
     private void OnReviewDuplicate(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: DuplicateReviewItem review } button) return;

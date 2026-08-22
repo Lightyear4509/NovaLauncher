@@ -18,7 +18,10 @@ public sealed record SaveSyncGameState(
     Guid? HeadSnapshotId,
     IReadOnlyList<SaveFileEntry> LastObservedFiles,
     string Status,
-    string? ConflictSnapshotId = null);
+    string? ConflictSnapshotId = null,
+    IReadOnlyList<Guid>? DestinationPeerIds = null,
+    DateTimeOffset? LastSuccessAtUtc = null,
+    string? LastError = null);
 
 public enum TrustedPeerState
 {

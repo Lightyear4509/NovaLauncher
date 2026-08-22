@@ -12,7 +12,10 @@ public sealed record LauncherSettings(
     string LibraryPlatformFilter = "All platforms",
     string LibraryAvailabilityFilter = "All games",
     bool LibraryFavoritesOnly = false,
-    string UpdateChannel = "Stable")
+    string UpdateChannel = "Stable",
+    string HomeSectionOrder = "Highlights,RecentlyPlayed,MostPlayed",
+    string HomeHiddenSections = "",
+    bool ControllerMode = false)
 {
     public static LauncherSettings Default { get; } = new(
         "nova-dark",

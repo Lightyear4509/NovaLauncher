@@ -197,6 +197,16 @@
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="Padding" Value="16" />
     </Style>
+    <Style Selector="Expander.panel-expander ToggleButton">
+      <Setter Property="Background" Value="{DynamicResource ThemeSurface}" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="MinHeight" Value="42" />
+    </Style>
+    <Style Selector="Expander.panel-expander ToggleButton:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ThemeButtonHover}" />
+    </Style>
     <Style Selector="Border.dialog">
       <Setter Property="Background" Value="{DynamicResource ThemeElevated}" />
       <Setter Property="BorderBrush" Value="{DynamicResource ThemeAccent}" />

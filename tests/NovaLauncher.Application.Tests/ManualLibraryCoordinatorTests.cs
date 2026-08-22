@@ -101,6 +101,25 @@ public sealed class ManualLibraryCoordinatorTests
         Assert.Single(steamCoordinator.Games);
     }
 
+    [Fact]
+    public async Task AdditionalLaunchActionsAreValidatedPersistedAndRemoved()
+    {
+        var store = new RecordingStore(DocumentSaveStatus.Saved);
+        using var coordinator = CreateCoordinator(store);
+        var game = (await coordinator.AddManualGameAsync(ValidDraft(), CancellationToken.None)).Item!;
+        var action = new GameLaunchAction(Guid.NewGuid(), "Configure", new("C:\\Games\\Config.exe", ["--safe mode"], "C:\\Games", LaunchTargetKind.Executable));
+
+        var saved = await coordinator.SaveLaunchActionAsync(game.Id, action, CancellationToken.None);
+
+        Assert.Equal(LibraryMutationStatus.Saved, saved.Status);
+        Assert.Equal(action, Assert.Single(saved.Item!.LaunchActions!));
+        var invalid = await coordinator.SaveLaunchActionAsync(game.Id, action with { Target = action.Target with { Target = "relative.exe" } }, CancellationToken.None);
+        Assert.Equal(LibraryMutationStatus.ValidationFailed, invalid.Status);
+        var removed = await coordinator.RemoveLaunchActionAsync(game.Id, action.Id, CancellationToken.None);
+        Assert.Equal(LibraryMutationStatus.Saved, removed.Status);
+        Assert.Empty(removed.Item!.LaunchActions!);
+    }
+
     private static LibraryCoordinator CreateCoordinator(IDocumentStore<GamesDocument> store) =>
         new(store, new ManualGameDraftValidator(), new FixedTimeProvider());
 

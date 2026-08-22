@@ -10,13 +10,13 @@ NovaLauncher does **not** download games or ROMs, bypass DRM, replace Steam, pro
 
 Download the latest build from [GitHub Releases](https://github.com/Lightyear4509/NovaLauncher/releases). For most users, choose:
 
-- `NovaLauncher-Setup-0.7.0-alpha.1-unsigned-win-x64.exe` for the Windows installer.
-- `NovaLauncher-0.7.0-alpha.1-unsigned-win-x64-portable.zip` if you prefer a portable copy.
+- `NovaLauncher-Setup-1.0.0-unsigned-win-x64.exe` for the Windows installer.
+- `NovaLauncher-1.0.0-unsigned-win-x64-portable.zip` if you prefer a portable copy.
 
-This alpha is explicitly **unsigned**. Windows cannot authenticate its publisher and may display **Unknown publisher** or a Microsoft Defender SmartScreen warning. Automatic update installation and signed rollback are unavailable in this build. Download `SHA256SUMS.txt` from the same release and verify the installer before opening it:
+This release is explicitly **unsigned**. Windows cannot authenticate its publisher and may display **Unknown publisher** or a Microsoft Defender SmartScreen warning. Automatic update installation and signed rollback are unavailable in this build. Download `SHA256SUMS.txt` from the same release and verify the installer before opening it:
 
 ```powershell
-Get-FileHash .\NovaLauncher-Setup-0.7.0-alpha.1-unsigned-win-x64.exe -Algorithm SHA256
+Get-FileHash .\NovaLauncher-Setup-1.0.0-unsigned-win-x64.exe -Algorithm SHA256
 ```
 
 Compare the complete result with the installer entry in `SHA256SUMS.txt`. Do not run the file if the values differ, and do not disable Windows security protections globally.
@@ -135,9 +135,9 @@ If both devices changed the same baseline, NovaLauncher blocks automatic replace
 - **Use remote** restores the peer's version after creating a managed backup.
 - **Keep both** preserves both versions for manual inspection.
 
-Keep independent backups of valuable saves. The alpha has safeguards for authenticated encryption, replay rejection, immutable manifests, atomic replacement, backup-before-restore, cancellation, offline retry, and conflicts, but it has not been qualified across every game, firewall, interruption, disk-full, sleep, or power-loss scenario.
+Keep independent backups of valuable saves. The preview has safeguards for authenticated encryption, replay rejection, immutable manifests, atomic replacement, backup-before-restore, cancellation, offline retry, and conflicts, but it has not been qualified across every game, firewall, interruption, disk-full, sleep, or power-loss scenario.
 
-## Transfer an authorized DRM-free game folder
+## Transfer an authorized game folder
 
 Peer game transfer is experimental and is limited to manually added, direct-executable games that you are legally authorized to copy. Steam and other store-managed installations are rejected.
 
@@ -148,7 +148,7 @@ Peer game transfer is experimental and is limited to manually added, direct-exec
 5. When the readiness message says the offer is ready, select **Authorize 24-hour offer**.
 6. On the receiving device, select **Refresh offers**, choose the offer and an empty destination, then select **Download or resume**.
 
-Packages of ordinary sizes are supported through at least 500 GiB, with a hard aggregate maximum of 700 GiB, a 50,000-file maximum, and a 16 GiB maximum for any individual file. These are upper capacity bounds, not a required minimum: smaller games transfer normally. Available disk space, network stability, and the 64 MiB/s application throttle still apply. Reparse points, links, device/sparse files, changing files, unsafe paths, and unmanifested received content are refused. NovaLauncher verifies every file before promoting the received folder and never installs, elevates, or launches it automatically.
+Packages of ordinary sizes are supported through at least 500 GiB, with a hard aggregate maximum of 700 GiB and a 50,000-file maximum. An individual file may use the remaining package capacity up to that same 700 GiB ceiling, allowing large game archive files without removing the aggregate bound. These are upper capacity bounds, not a required minimum: smaller games transfer normally. Available disk space, network stability, and the 64 MiB/s application throttle still apply. Reparse points, links, device/sparse files, changing files, unsafe paths, and unmanifested received content are refused. NovaLauncher verifies every file before promoting the received folder and never installs, elevates, or launches it automatically.
 
 ## Back up or restore NovaLauncher data
 
@@ -166,7 +166,7 @@ When reporting a problem, include the NovaLauncher version, the action that fail
 
 ### The application process starts but no window appears
 
-Install the newest alpha build or try the portable package in a clean folder. If the problem continues, collect the local diagnostic message and open a GitHub issue with your Windows version and display configuration.
+Install the newest release build or try the portable package in a clean folder. If the problem continues, collect the local diagnostic message and open a GitHub issue with your Windows version and display configuration.
 
 ### A game requires elevated permissions
 
@@ -201,7 +201,7 @@ See [Privacy](PRIVACY.md), [Security](SECURITY.md), and [Support](SUPPORT.md) fo
 
 ## Current release status
 
-`v0.7.0-alpha.1-unsigned` introduces NovaLauncher's componentized visual identity across Home, Library, game details, Downloads & Saves, and Settings. It also makes authorized manual DRM-free folder offers easier to prepare by recursively scanning the selected game folder, while retaining bounded manifests and a hard 700 GiB aggregate limit. Because this preview has no publisher certificate, update installation and signed rollback fail closed and remain unavailable. This preview is not production- or legal/security-qualified; physical multi-device, installation lifecycle, accessibility, antivirus, and independent review remain open.
+`v1.0.0-unsigned` is NovaLauncher's first versioned 1.0 preview. It combines the artwork-first Home and Library experience with manual and Steam discovery, additional launch actions, read-only achievements, per-game multi-peer save destinations, resumable authenticated save transfers, integrity audits, credential rotation, and bounded authorized game-folder transfer. Because this build has no publisher certificate, update installation and signed rollback fail closed and remain unavailable. This release is not production- or legal/security-qualified; signed installation lifecycle, physical multi-device and very-large transfer qualification, accessibility, antivirus, interruption recovery, and independent review remain open.
 
 Please use test data or maintain independent backups while evaluating experimental save synchronization.
 

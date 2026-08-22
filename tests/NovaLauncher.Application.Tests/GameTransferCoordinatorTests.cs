@@ -68,6 +68,16 @@ public sealed class GameTransferCoordinatorTests : IDisposable
         Assert.Equal(expected, GameTransferCoordinator.IsPackageSizeWithinLimit(bytes));
     }
 
+    [Theory]
+    [InlineData(16L * 1024 * 1024 * 1024 + 1, true)]
+    [InlineData(24L * 1024 * 1024 * 1024, true)]
+    [InlineData(700L * 1024 * 1024 * 1024, true)]
+    [InlineData(700L * 1024 * 1024 * 1024 + 1, false)]
+    public void IndividualFileLimitSupportsLargeGameArchivesWithinPackageCeiling(long bytes, bool expected)
+    {
+        Assert.Equal(expected, GameTransferCoordinator.IsFileSizeWithinLimit(bytes));
+    }
+
     [Fact]
     public async Task ChunkServingRejectsMutationAndTraversal()
     {
@@ -223,6 +233,7 @@ public sealed class GameTransferCoordinatorTests : IDisposable
 
     private sealed class SaveSyncStub(Guid peerId) : ISaveSyncService
     {
+        public event Action<SaveTransferProgress>? TransferProgressChanged { add { } remove { } }
         public TrustedSaveSyncPeer Peer { get; } = new(peerId, "Peer", "100.64.0.2", $"test/{peerId:N}", TrustedPeerState.Active, DateTimeOffset.UtcNow);
         public SaveSyncSettings Settings => new(Guid.NewGuid(), "Local", "100.64.0.2", peerId, SaveSyncSettings.DefaultPort, [], TrustedPeers: [Peer]);
         public bool IsPaired => true; public bool IsListening => true; public string ListenerStatus => "Listening";
@@ -236,12 +247,15 @@ public sealed class GameTransferCoordinatorTests : IDisposable
         public Task<string?> RotatePeerCredentialAsync(Guid id, CancellationToken token) => Task.FromResult<string?>(null);
         public Task<string?> ConfigurePeerAsync(string address, CancellationToken token) => Task.FromResult<string?>(null);
         public Task<string?> RetryListenerAsync(CancellationToken token) => Task.FromResult<string?>(null);
+        public Task<string?> CancelPartialTransfersAsync(CancellationToken token) => Task.FromResult<string?>(null);
         public (Guid? Identity, string? Error) DeriveSharedSaveIdentity(string label, string platform) => (null, null);
         public Task<int> RetryPendingUploadsAsync(CancellationToken token) => Task.FromResult(0);
         public Task<SaveSyncResult> PullBeforeLaunchAsync(LibraryItem game, CancellationToken token) => Task.FromResult(new SaveSyncResult(SaveSyncStatus.Unchanged, ""));
         public Task<SaveSyncResult> SnapshotAndPushAfterExitAsync(LibraryItem game, CancellationToken token) => Task.FromResult(new SaveSyncResult(SaveSyncStatus.Unchanged, ""));
         public Task<SaveSyncResult> ResolveConflictAsync(LibraryItem game, SaveConflictChoice choice, CancellationToken token) => Task.FromResult(new SaveSyncResult(SaveSyncStatus.Unchanged, ""));
+        public Task<IReadOnlyList<SaveConflictComparisonItem>> GetConflictComparisonAsync(LibraryItem game, CancellationToken token) => Task.FromResult<IReadOnlyList<SaveConflictComparisonItem>>([]);
         public Task<IReadOnlyList<SaveSnapshotHistoryItem>> GetSnapshotHistoryAsync(GameId id, CancellationToken token) => Task.FromResult<IReadOnlyList<SaveSnapshotHistoryItem>>([]);
+        public Task<SaveSyncResult> VerifySnapshotsAsync(GameId id, CancellationToken token) => Task.FromResult(new SaveSyncResult(SaveSyncStatus.Unchanged, "Verified."));
         public Task<SaveSyncResult> RestoreSnapshotAsync(LibraryItem game, Guid id, CancellationToken token) => Task.FromResult(new SaveSyncResult(SaveSyncStatus.Unchanged, ""));
         public Task<IReadOnlyList<SaveRestoreHistoryItem>> GetRestoreHistoryAsync(GameId id, CancellationToken token) => Task.FromResult<IReadOnlyList<SaveRestoreHistoryItem>>([]);
     }

@@ -13,6 +13,10 @@ public sealed record LibraryViewPreferences(
     string AvailabilityFilter,
     bool FavoritesOnly);
 
+public sealed record HomeViewPreferences(
+    IReadOnlyList<string> SectionOrder,
+    IReadOnlySet<string> HiddenSections);
+
 public interface IThemeHost
 {
     string CurrentThemeId { get; }
@@ -32,7 +36,11 @@ public interface IThemeService
 
     bool ReduceMotion { get; }
 
+    bool ControllerMode { get; }
+
     LibraryViewPreferences LibraryPreferences { get; }
+
+    HomeViewPreferences HomePreferences { get; }
 
     string? TailscalePeerAddress { get; }
 
@@ -44,7 +52,11 @@ public interface IThemeService
 
     Task<string?> ConfigureReduceMotionAsync(bool reduceMotion, CancellationToken cancellationToken);
 
+    Task<string?> ConfigureControllerModeAsync(bool enabled, CancellationToken cancellationToken);
+
     Task<string?> SaveLibraryPreferencesAsync(LibraryViewPreferences preferences, CancellationToken cancellationToken);
+
+    Task<string?> SaveHomePreferencesAsync(HomeViewPreferences preferences, CancellationToken cancellationToken);
 
     Task<string?> ConfigureTailscalePeerAsync(string address, CancellationToken cancellationToken);
 
@@ -72,6 +84,8 @@ public sealed class ThemeService(
 
     public bool ReduceMotion => _settings.Settings.ReduceMotion;
 
+    public bool ControllerMode => _settings.Settings.ControllerMode;
+
     public LibraryViewPreferences LibraryPreferences => new(
         _settings.Settings.LibraryViewMode,
         _settings.Settings.LibraryCardSize,
@@ -80,6 +94,10 @@ public sealed class ThemeService(
         _settings.Settings.LibraryPlatformFilter,
         _settings.Settings.LibraryAvailabilityFilter,
         _settings.Settings.LibraryFavoritesOnly);
+
+    public HomeViewPreferences HomePreferences => new(
+        ParseHomeSections(_settings.Settings.HomeSectionOrder),
+        ParseHiddenHomeSections(_settings.Settings.HomeHiddenSections));
 
     public string? TailscalePeerAddress => _settings.Settings.TailscalePeerAddress;
 
@@ -141,6 +159,31 @@ public sealed class ThemeService(
         }
     }
 
+    public async Task<string?> SaveHomePreferencesAsync(HomeViewPreferences preferences, CancellationToken cancellationToken)
+    {
+        if (!IsValidHomePreferences(preferences)) return "The selected Home layout is invalid.";
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var staged = _settings with
+            {
+                Settings = _settings.Settings with
+                {
+                    HomeSectionOrder = string.Join(',', preferences.SectionOrder),
+                    HomeHiddenSections = string.Join(',', preferences.HiddenSections.Order(StringComparer.Ordinal)),
+                },
+            };
+            var save = await store.SaveAsync(staged, cancellationToken).ConfigureAwait(false);
+            if (save.Status != DocumentSaveStatus.Saved) return save.Error ?? "Home layout preferences could not be saved.";
+            _settings = staged;
+            return null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     private static bool IsValidLibraryPreferences(LibraryViewPreferences value) =>
         value.ViewMode is "Grid" or "List" &&
         value.CardSize is "Small" or "Medium" or "Large" &&
@@ -148,6 +191,26 @@ public sealed class ThemeService(
         value.SourceFilter is "All sources" or "Manual" or "Steam" &&
         value.PlatformFilter is "All platforms" or "Windows" or "Linux" or "macOS" or "Other" &&
         value.AvailabilityFilter is "All games" or "Available" or "Missing target";
+
+    private static readonly string[] HomeSectionIds = ["Highlights", "RecentlyPlayed", "MostPlayed"];
+
+    private static string[] ParseHomeSections(string value)
+    {
+        var sections = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return sections.Length == HomeSectionIds.Length && sections.ToHashSet(StringComparer.Ordinal).SetEquals(HomeSectionIds)
+            ? sections
+            : HomeSectionIds;
+    }
+
+    private static HashSet<string> ParseHiddenHomeSections(string value) => value
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Where(id => HomeSectionIds.Contains(id, StringComparer.Ordinal))
+        .ToHashSet(StringComparer.Ordinal);
+
+    private static bool IsValidHomePreferences(HomeViewPreferences value) =>
+        value.SectionOrder.Count == HomeSectionIds.Length &&
+        value.SectionOrder.ToHashSet(StringComparer.Ordinal).SetEquals(HomeSectionIds) &&
+        value.HiddenSections.All(id => HomeSectionIds.Contains(id, StringComparer.Ordinal));
 
     public async Task<string?> ConfigureReduceMotionAsync(bool reduceMotion, CancellationToken cancellationToken)
     {
@@ -171,6 +234,20 @@ public sealed class ThemeService(
         {
             _gate.Release();
         }
+    }
+
+    public async Task<string?> ConfigureControllerModeAsync(bool enabled, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var staged = _settings with { Settings = _settings.Settings with { ControllerMode = enabled } };
+            var save = await store.SaveAsync(staged, cancellationToken).ConfigureAwait(false);
+            if (save.Status != DocumentSaveStatus.Saved) return save.Error ?? "Controller mode preference could not be saved.";
+            _settings = staged;
+            return null;
+        }
+        finally { _gate.Release(); }
     }
 
     public async Task<string?> ApplyAsync(string themeId, CancellationToken cancellationToken)

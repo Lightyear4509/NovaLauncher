@@ -16,14 +16,14 @@ public sealed class LifecycleServicesTests : IDisposable
     public async Task UpdateCheckAcceptsOnlyNewerOfficialChannelAsset()
     {
         var installer = new byte[] { 1, 2, 3 }; var handler = new RoutingHandler();
-        handler.AddJson("api.github.com", ReleasesJson("v0.7.0-beta.1", true, installer.Length));
+        handler.AddJson("api.github.com", ReleasesJson("v1.1.0-beta.1", true, installer.Length));
         var service = CreateUpdateService(handler, new FakeAuthenticode(true), new FakeInstallerLauncher(), "stage", hasPin: true);
 
         var stable = await service.CheckAsync(UpdateChannel.Stable, CancellationToken.None);
         var beta = await service.CheckAsync(UpdateChannel.Beta, CancellationToken.None);
 
         Assert.Null(stable.Release);
-        Assert.Equal("v0.7.0-beta.1", Assert.IsType<UpdateRelease>(beta.Release).Tag);
+        Assert.Equal("v1.1.0-beta.1", Assert.IsType<UpdateRelease>(beta.Release).Tag);
     }
 
     [Fact]
