@@ -14,9 +14,7 @@ public sealed class MainWindowAccessibilityContractTests
     [Fact]
     public async Task PrimaryControlsExposeNamesStatusAndKeyboardAccess()
     {
-        var xaml = await File.ReadAllTextAsync(
-            Path.Combine(AppContext.BaseDirectory, "MainWindow.axaml"),
-            CancellationToken.None);
+        var xaml = await ReadPresentationAsync();
 
         Assert.Contains("AutomationProperties.Name=\"Search library\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Library sort order\"", xaml, StringComparison.Ordinal);
@@ -30,7 +28,6 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("AutomationProperties.LiveSetting=\"Polite\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Preview Steam library import\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Steam import preview\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Import Steam games\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Refresh selected game metadata and artwork\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Selected game artwork\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Game cover artwork\"", xaml, StringComparison.Ordinal);
@@ -44,7 +41,7 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.DoesNotContain("Artwork.Cover.Location", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Refresh metadata\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Save game\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Play\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"▶  Play\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Request administrator permission for this game\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"SteamGridDB API key\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Open Home page\"", xaml, StringComparison.Ordinal);
@@ -56,7 +53,10 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("Generate 24-hour invitation", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Copy six-digit invitation code\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Paste six-digit invitation code\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("AutomationProperties.Name=\"Preview bounded game transfer manifest\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Choose and recursively scan manual game transfer source folder\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Rescan bounded game transfer manifest\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding Workspace.GameTransferAuthorizationHint}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled=\"{Binding Workspace.CanAuthorizeGameTransfer}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Trusted game transfer recipient\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Attest game copy rights\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Authorize reviewed game transfer to selected peer\"", xaml, StringComparison.Ordinal);
@@ -88,5 +88,15 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("AutomationProperties.Name=\"Failed update rollback status\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Open verified previous NovaLauncher installer\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Export sanitized local diagnostics\"", xaml, StringComparison.Ordinal);
+    }
+
+    private static async Task<string> ReadPresentationAsync()
+    {
+        var files = Directory.EnumerateFiles(AppContext.BaseDirectory, "*.axaml", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path) != "App.axaml")
+            .OrderBy(static path => path, StringComparer.Ordinal);
+        var content = new List<string>();
+        foreach (var file in files) content.Add(await File.ReadAllTextAsync(file, CancellationToken.None));
+        return string.Join(Environment.NewLine, content);
     }
 }

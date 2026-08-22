@@ -10,13 +10,13 @@ NovaLauncher does **not** download games or ROMs, bypass DRM, replace Steam, pro
 
 Download the latest build from [GitHub Releases](https://github.com/Lightyear4509/NovaLauncher/releases). For most users, choose:
 
-- `NovaLauncher-Setup-0.6.0-alpha.1-unsigned-win-x64.exe` for the Windows installer.
-- `NovaLauncher-0.6.0-alpha.1-unsigned-win-x64-portable.zip` if you prefer a portable copy.
+- `NovaLauncher-Setup-0.7.0-alpha.1-unsigned-win-x64.exe` for the Windows installer.
+- `NovaLauncher-0.7.0-alpha.1-unsigned-win-x64-portable.zip` if you prefer a portable copy.
 
 This alpha is explicitly **unsigned**. Windows cannot authenticate its publisher and may display **Unknown publisher** or a Microsoft Defender SmartScreen warning. Automatic update installation and signed rollback are unavailable in this build. Download `SHA256SUMS.txt` from the same release and verify the installer before opening it:
 
 ```powershell
-Get-FileHash .\NovaLauncher-Setup-0.6.0-alpha.1-unsigned-win-x64.exe -Algorithm SHA256
+Get-FileHash .\NovaLauncher-Setup-0.7.0-alpha.1-unsigned-win-x64.exe -Algorithm SHA256
 ```
 
 Compare the complete result with the installer entry in `SHA256SUMS.txt`. Do not run the file if the values differ, and do not disable Windows security protections globally.
@@ -38,6 +38,8 @@ Compare the complete result with the installer entry in `SHA256SUMS.txt`. Do not
 4. Delete that extracted folder when you no longer want the portable application. This does not delete your installed games.
 
 ## Navigate the launcher
+
+NovaLauncher uses a componentized artwork-first desktop shell. Home presents the current featured/recent game as a hero when library data is available; Library provides the existing search, filters, sort, collections, grid/list modes, bulk actions, and incremental rendering; game details group secondary metadata, artwork, and save tools into focused expandable panels. The persistent operation notice at the bottom remains an accessible live status region.
 
 The left navigation rail contains four primary pages:
 
@@ -135,6 +137,19 @@ If both devices changed the same baseline, NovaLauncher blocks automatic replace
 
 Keep independent backups of valuable saves. The alpha has safeguards for authenticated encryption, replay rejection, immutable manifests, atomic replacement, backup-before-restore, cancellation, offline retry, and conflicts, but it has not been qualified across every game, firewall, interruption, disk-full, sleep, or power-loss scenario.
 
+## Transfer an authorized DRM-free game folder
+
+Peer game transfer is experimental and is limited to manually added, direct-executable games that you are legally authorized to copy. Steam and other store-managed installations are rejected.
+
+1. Pair both devices and leave NovaLauncher and Tailscale running.
+2. On the sending device, select the manual game in **Library**, then open **Downloads & Saves**.
+3. Select **Choose folder & scan** and choose the folder containing the executable used by that library entry. NovaLauncher automatically scans every regular file in the folder and all subfolders.
+4. Review the displayed file count and total size, choose one active trusted recipient, and confirm the copy-rights checkbox.
+5. When the readiness message says the offer is ready, select **Authorize 24-hour offer**.
+6. On the receiving device, select **Refresh offers**, choose the offer and an empty destination, then select **Download or resume**.
+
+Packages of ordinary sizes are supported through at least 500 GiB, with a hard aggregate maximum of 700 GiB, a 50,000-file maximum, and a 16 GiB maximum for any individual file. These are upper capacity bounds, not a required minimum: smaller games transfer normally. Available disk space, network stability, and the 64 MiB/s application throttle still apply. Reparse points, links, device/sparse files, changing files, unsafe paths, and unmanifested received content are refused. NovaLauncher verifies every file before promoting the received folder and never installs, elevates, or launches it automatically.
+
 ## Back up or restore NovaLauncher data
 
 Open **Downloads & Saves**, choose a destination archive path, and select **Export local backup**. Use **Restore local NovaLauncher backup** to validate and restore a compatible archive.
@@ -186,7 +201,7 @@ See [Privacy](PRIVACY.md), [Security](SECURITY.md), and [Support](SUPPORT.md) fo
 
 ## Current release status
 
-`v0.6.0-alpha.1-unsigned` adds explicit update discovery, bounded release metadata and downloads, local migration/recovery status, sanitized diagnostics, and tamper-resistant signed-update staging. Because this preview has no publisher certificate, update installation and signed rollback fail closed and remain unavailable. It also retains Phase 5's explicit peer transfer of user-authorized manual DRM-free game folders. This preview is not production- or legal/security-qualified; physical multi-device, installation lifecycle, accessibility, antivirus, and independent review remain open.
+`v0.7.0-alpha.1-unsigned` introduces NovaLauncher's componentized visual identity across Home, Library, game details, Downloads & Saves, and Settings. It also makes authorized manual DRM-free folder offers easier to prepare by recursively scanning the selected game folder, while retaining bounded manifests and a hard 700 GiB aggregate limit. Because this preview has no publisher certificate, update installation and signed rollback fail closed and remain unavailable. This preview is not production- or legal/security-qualified; physical multi-device, installation lifecycle, accessibility, antivirus, and independent review remain open.
 
 Please use test data or maintain independent backups while evaluating experimental save synchronization.
 

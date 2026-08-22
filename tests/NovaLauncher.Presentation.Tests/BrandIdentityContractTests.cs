@@ -46,35 +46,36 @@ public sealed class BrandIdentityContractTests
     {
         var xaml = await ReadAsync("App.axaml");
         Assert.Contains("<x:TimeSpan x:Key=\"MotionDuration\">0:0:0.16</x:TimeSpan>", xaml, StringComparison.Ordinal);
-        Assert.Equal(3, xaml.Split("Duration=\"{DynamicResource MotionDuration}\"", StringSplitOptions.None).Length - 1);
+        Assert.Equal(5, xaml.Split("Duration=\"{DynamicResource MotionDuration}\"", StringSplitOptions.None).Length - 1);
     }
 
     [Fact]
     public async Task ShellUsesOriginalBrandAssetAndAccessibleIdentityStates()
     {
-        var xaml = await ReadAsync("MainWindow.axaml");
+        var xaml = await ReadPresentationAsync();
 
         Assert.Contains("novalauncher-mark-concept.png", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"NovaLauncher brand mark\"", xaml, StringComparison.Ordinal);
         Assert.Contains("YOUR GAMES · YOUR SPACE", xaml, StringComparison.Ordinal);
         Assert.Contains("LOCAL-FIRST", xaml, StringComparison.Ordinal);
-        Assert.Contains("PRIVATE BY DESIGN", xaml, StringComparison.Ordinal);
-        Assert.Contains("Classes=\"primary\" Content=\"Play\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Classes=\"game-card\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"NOVA\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"LAUNCHER\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Classes=\"primary hero-action\" Content=\"▶  Play\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Classes=\"game-tile\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Reduce interface motion\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Toggle navigation size\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Go to previous page\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Go to next page\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"NovaLauncher operation in progress\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("MinWidth=\"820\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("MinHeight=\"600\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("MinWidth=\"880\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("MinHeight=\"640\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task ReusableFeedbackAndEmptyStateComponentsRemainAvailable()
     {
         var app = await ReadAsync("App.axaml");
-        var window = await ReadAsync("MainWindow.axaml");
+        var window = await ReadPresentationAsync();
 
         Assert.Contains("Selector=\"Border.dialog\"", app, StringComparison.Ordinal);
         Assert.Contains("Selector=\"Border.toast\"", app, StringComparison.Ordinal);
@@ -99,20 +100,20 @@ public sealed class BrandIdentityContractTests
     [Fact]
     public async Task PhaseTwoHomeUsesHonestLocalDashboardStates()
     {
-        var xaml = await ReadAsync("MainWindow.axaml");
+        var xaml = await ReadPresentationAsync();
 
         Assert.Contains("AutomationProperties.Name=\"Launch featured game\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Recently played games\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Most played games\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Workspace.TotalLibraryPlayTime", xaml, StringComparison.Ordinal);
-        Assert.Contains("directly monitored local executable sessions", xaml, StringComparison.Ordinal);
+        Assert.Contains("monitored locally", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Not tracked. NovaLauncher does not monitor playtime", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task PhaseTwoLibraryExposesLocalFiltersAndResponsiveViewControls()
     {
-        var xaml = await ReadAsync("MainWindow.axaml");
+        var xaml = await ReadPresentationAsync();
 
         Assert.Contains("AutomationProperties.Name=\"Search library\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Filter library by source\"", xaml, StringComparison.Ordinal);
@@ -130,4 +131,14 @@ public sealed class BrandIdentityContractTests
 
     private static Task<string> ReadAsync(string fileName) =>
         File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, fileName), CancellationToken.None);
+
+    private static async Task<string> ReadPresentationAsync()
+    {
+        var files = Directory.EnumerateFiles(AppContext.BaseDirectory, "*.axaml", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path) != "App.axaml")
+            .OrderBy(static path => path, StringComparer.Ordinal);
+        var content = new List<string>();
+        foreach (var file in files) content.Add(await File.ReadAllTextAsync(file, CancellationToken.None));
+        return string.Join(Environment.NewLine, content);
+    }
 }

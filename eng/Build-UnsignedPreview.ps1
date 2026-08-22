@@ -13,7 +13,7 @@ $dotnet = if ([string]::IsNullOrWhiteSpace($DotNetPath)) {
 $publish = Join-Path $root 'artifacts\publish\win-x64'
 $release = Join-Path $root 'artifacts\release'
 $iscc = Join-Path $root '.tools\InnoSetup\ISCC.exe'
-$version = '0.6.0-alpha.1'
+$version = '0.7.0-alpha.1'
 
 if (-not (Test-Path $dotnet -PathType Leaf)) { throw "Pinned .NET SDK is missing at: $dotnet" }
 $dotnetVersion = (& $dotnet --version).Trim()
