@@ -10,13 +10,13 @@ NovaLauncher does **not** download games or ROMs, bypass DRM, replace Steam, pro
 
 Download the latest build from [GitHub Releases](https://github.com/Lightyear4509/NovaLauncher/releases). For most users, choose:
 
-- `NovaLauncher-Setup-1.2.0-unsigned-win-x64.exe` for the Windows installer.
-- `NovaLauncher-1.2.0-unsigned-win-x64-portable.zip` if you prefer a portable copy.
+- `NovaLauncher-Setup-1.2.1-unsigned-win-x64.exe` for the Windows installer.
+- `NovaLauncher-1.2.1-unsigned-win-x64-portable.zip` if you prefer a portable copy.
 
 This release is explicitly **unsigned**. Windows cannot authenticate its publisher and may display **Unknown publisher** or a Microsoft Defender SmartScreen warning. Automatic update installation and signed rollback are unavailable in this build. Download `SHA256SUMS.txt` from the same release and verify the installer before opening it:
 
 ```powershell
-Get-FileHash .\NovaLauncher-Setup-1.2.0-unsigned-win-x64.exe -Algorithm SHA256
+Get-FileHash .\NovaLauncher-Setup-1.2.1-unsigned-win-x64.exe -Algorithm SHA256
 ```
 
 Compare the complete result with the installer entry in `SHA256SUMS.txt`. Do not run the file if the values differ, and do not disable Windows security protections globally.
@@ -201,7 +201,7 @@ See [Privacy](PRIVACY.md), [Security](SECURITY.md), and [Support](SUPPORT.md) fo
 
 ## Current release status
 
-`v1.2.0-unsigned` delivers NovaLauncher's professional UI overhaul. Saves and game-folder transfer now have separate focused pages, the launcher uses one restrained Nova visual system with Dark and Light modes, navigation uses consistent vector iconography, and primary, secondary, quiet, and destructive actions have a clearer premium hierarchy. Because this build has no publisher certificate, update installation and signed rollback fail closed and remain unavailable. Physical multi-device, controller, display-scale, antivirus, interruption, and very-large-transfer qualification remain open.
+`v1.2.1-unsigned` includes NovaLauncher's professional UI overhaul and fixes incoming game-offer refresh diagnostics. Peer connection, identity, and authentication failures are now shown instead of appearing as an unexplained empty offer list; offer IDs and status details wrap rather than being truncated. Because this build has no publisher certificate, update installation and signed rollback fail closed and remain unavailable. Physical multi-device, controller, display-scale, antivirus, interruption, and very-large-transfer qualification remain open.
 
 Please use test data or maintain independent backups while evaluating experimental save synchronization.
 

@@ -56,7 +56,7 @@
       </Grid>
 
       <StackPanel Spacing="10">
-        <Grid ColumnDefinitions="*,Auto"><TextBlock Text="Active transfer" Classes="section-title" /><Border Grid.Column="1" Classes="status-badge"><TextBlock Text="{Binding Workspace.GameTransferStatus}" MaxWidth="520" TextTrimming="CharacterEllipsis" Classes="caption" /></Border></Grid>
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16"><TextBlock Text="Active transfer" Classes="section-title" /><Border Grid.Column="1" Classes="status-badge" HorizontalAlignment="Right"><TextBlock Text="{Binding Workspace.GameTransferStatus}" MaxWidth="720" TextWrapping="Wrap" Classes="caption" AutomationProperties.Name="Game transfer status and offer refresh details" /></Border></Grid>
         <Border Classes="transfer-row">
           <Grid ColumnDefinitions="2*,3*,Auto" ColumnSpacing="24">
             <StackPanel Spacing="4"><TextBlock Text="Private game transfer" FontSize="16" FontWeight="SemiBold" /><TextBlock Text="Verified chunks are retained when a transfer is paused." Classes="caption" TextWrapping="Wrap" /></StackPanel>

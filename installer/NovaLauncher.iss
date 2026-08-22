@@ -1,5 +1,5 @@
 #define AppName "NovaLauncher"
-#define AppVersion "1.2.0"
+#define AppVersion "1.2.1"
 #define AppPublisher "NovaLauncher Contributors"
 #ifndef ArtifactSuffix
   #define ArtifactSuffix ""
@@ -23,7 +23,7 @@ AppPublisher={#AppPublisher}
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription={#AppName} {#if UnsignedPreview}unsigned preview{#else}signed lifecycle candidate{#endif} installer
 VersionInfoProductName={#AppName}
-VersionInfoProductVersion=1.2.0.0
+VersionInfoProductVersion=1.2.1.0
 DefaultDirName={localappdata}\Programs\NovaLauncher
 DefaultGroupName=NovaLauncher
 PrivilegesRequired=lowest
@@ -31,7 +31,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#InstallerOutputDir}
-OutputBaseFilename=NovaLauncher-Setup-1.2.0{#ArtifactSuffix}-win-x64
+OutputBaseFilename=NovaLauncher-Setup-1.2.1{#ArtifactSuffix}-win-x64
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern dynamic

@@ -48,6 +48,10 @@ public sealed class TailscaleTcpTransport(
     public async Task<IReadOnlyList<GameTransferManifest>> ListGameTransferOffersAsync(TrustedSaveSyncPeer peer, CancellationToken cancellationToken)
     {
         var response = await SendWireAsync(peer, new WireRequest(Guid.NewGuid(), "ListGameTransfers", settings().DeviceId, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), default, null, null, null, null, 0, 0), cancellationToken).ConfigureAwait(false);
+        if (response.Result is { Success: false } failure)
+            throw new InvalidOperationException(failure.Error ?? "The peer rejected the offer refresh request.");
+        if (response.GameTransferOffers is null)
+            throw new InvalidOperationException("The peer returned no game-transfer offer response.");
         return response.GameTransferOffers ?? [];
     }
 

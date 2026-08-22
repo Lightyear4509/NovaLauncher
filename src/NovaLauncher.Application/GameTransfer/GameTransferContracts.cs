@@ -8,6 +8,7 @@ public sealed record GameTransferManifest(Guid OfferId, GameId GameId, string Pa
 public sealed record GameTransferPreview(bool Accepted, string PackageName, string SourceFolder, IReadOnlyList<GameTransferFile> Files, IReadOnlyList<string> Exclusions, long TotalBytes, string? Error);
 public sealed record AuthorizedGameTransfer(GameTransferManifest Manifest, string SourceFolder, IReadOnlySet<Guid> RecipientDeviceIds);
 public sealed record PeerGameTransferOffer(TrustedSaveSyncPeer Peer, GameTransferManifest Manifest);
+public sealed record GameTransferOfferRefreshResult(IReadOnlyList<PeerGameTransferOffer> Offers, IReadOnlyList<string> Failures);
 public sealed record GameTransferChunkResult(bool Success, byte[]? Bytes, bool EndOfFile, string? Error);
 public sealed record GameTransferResult(bool Success, bool Resumable, string Message, long CompletedBytes = 0, long TotalBytes = 0);
 public sealed record GameTransferProgress(string PackageName, string RelativePath, long CompletedBytes, long TotalBytes, double BytesPerSecond);
@@ -39,7 +40,7 @@ public interface IGameTransferService : IPeerGameTransferEndpoint
 
     Task<GameTransferPreview> PreviewAsync(LibraryItem game, string sourceFolder, CancellationToken cancellationToken);
     Task<GameTransferResult> AuthorizeAsync(LibraryItem game, GameTransferPreview preview, IReadOnlyCollection<Guid> recipientDeviceIds, bool userAttestedCopyRights, CancellationToken cancellationToken);
-    Task<IReadOnlyList<PeerGameTransferOffer>> RefreshOffersAsync(CancellationToken cancellationToken);
+    Task<GameTransferOfferRefreshResult> RefreshOffersAsync(CancellationToken cancellationToken);
     Task<GameTransferResult> DownloadAsync(PeerGameTransferOffer offer, string destination, IProgress<GameTransferProgress>? progress, CancellationToken cancellationToken);
     Task<IReadOnlyList<GameTransferAuditItem>> GetHistoryAsync(CancellationToken cancellationToken);
 }

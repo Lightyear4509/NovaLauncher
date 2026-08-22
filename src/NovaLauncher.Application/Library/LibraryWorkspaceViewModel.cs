@@ -2333,8 +2333,13 @@ public sealed class LibraryWorkspaceViewModel(
     {
         if (gameTransfers is null) return;
         PeerGameTransferOffers.Clear();
-        foreach (var offer in await gameTransfers.RefreshOffersAsync(cancellationToken)) PeerGameTransferOffers.Add(offer);
-        GameTransferStatus = PeerGameTransferOffers.Count == 0 ? "No authorized offers are available from active trusted devices." : $"Found {PeerGameTransferOffers.Count} authorized offer(s).";
+        var refresh = await gameTransfers.RefreshOffersAsync(cancellationToken);
+        foreach (var offer in refresh.Offers) PeerGameTransferOffers.Add(offer);
+        GameTransferStatus = refresh.Failures.Count > 0
+            ? $"Found {PeerGameTransferOffers.Count} offer(s). Refresh failed for {refresh.Failures.Count} device(s): {string.Join("; ", refresh.Failures)}"
+            : PeerGameTransferOffers.Count == 0
+                ? "No authorized offers were found. Refresh on the receiving device while the sending device and NovaLauncher remain running."
+                : $"Found {PeerGameTransferOffers.Count} authorized offer(s).";
     }
 
     public async Task DownloadSelectedGameTransferAsync(CancellationToken cancellationToken)

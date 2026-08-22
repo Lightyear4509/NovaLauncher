@@ -42,6 +42,20 @@ public sealed class GameTransferCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshOffersReportsPeerFailureInsteadOfSilentlyReturningEmpty()
+    {
+        var saveSync = new SaveSyncStub(Guid.NewGuid());
+        using var service = new GameTransferCoordinator(new FailingOfferTransport(), saveSync, TimeProvider.System, Path.Combine(_root, "refresh"));
+
+        var result = await service.RefreshOffersAsync(CancellationToken.None);
+
+        Assert.Empty(result.Offers);
+        var failure = Assert.Single(result.Failures);
+        Assert.Contains(saveSync.Peer.DisplayName, failure, StringComparison.Ordinal);
+        Assert.Contains("identity", failure, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task AuthorizationRevalidatesContentEvenWhenSizeAndTimestampAreUnchanged()
     {
         var source = await CreateSourceAsync();
@@ -269,6 +283,15 @@ public sealed class GameTransferCoordinatorTests : IDisposable
 
     private sealed class RejectingScanner : IReceivedContentScanner
     { public Task<ReceivedContentScanResult> ScanAsync(string directory, CancellationToken token) => Task.FromResult(new ReceivedContentScanResult(true, false, "Test threat")); }
+
+    private sealed class FailingOfferTransport : IPeerGameTransferTransport
+    {
+        public void AttachGameTransferEndpoint(IPeerGameTransferEndpoint endpoint) { }
+        public Task<IReadOnlyList<GameTransferManifest>> ListGameTransferOffersAsync(TrustedSaveSyncPeer peer, CancellationToken token) =>
+            throw new InvalidOperationException("The request identity was rejected.");
+        public Task<GameTransferChunkResult> PullGameTransferChunkAsync(TrustedSaveSyncPeer peer, Guid offerId, string path, long offset, int maximum, CancellationToken token) =>
+            throw new NotSupportedException();
+    }
 
     private sealed class SaveSyncStub(Guid peerId) : ISaveSyncService
     {

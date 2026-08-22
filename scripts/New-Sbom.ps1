@@ -29,7 +29,7 @@ $sbom = [ordered]@{
     version = 1
     metadata = [ordered]@{
         timestamp = [DateTimeOffset]::UtcNow.ToString('O')
-        component = [ordered]@{ type = 'application'; name = 'NovaLauncher'; version = '1.2.0' }
+        component = [ordered]@{ type = 'application'; name = 'NovaLauncher'; version = '1.2.1' }
     }
     components = @($components.Values | Sort-Object name, version)
 }

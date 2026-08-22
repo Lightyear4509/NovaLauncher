@@ -113,21 +113,35 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
             var manifest = new GameTransferManifest(id, game.Id, preview.PackageName, saveSync.Settings.DeviceId, now, now.AddHours(24), preview.Files, preview.TotalBytes);
             _offers[id] = new(manifest, preview.SourceFolder, recipients);
             await AppendAuditAsync(new(Guid.NewGuid(), id, Guid.Empty, preview.PackageName, preview.TotalBytes, preview.Files.Count, now, "Authorized"), cancellationToken).ConfigureAwait(false);
-            return new(true, false, $"Offer {id:N} is authorized for {recipients.Count} trusted device(s) for 24 hours.", 0, preview.TotalBytes);
+            return new(true, false, $"Offer ID {id:N} is authorized for {recipients.Count} trusted device(s) for 24 hours. On the receiving device, open Downloads & Sharing and select Refresh offers. Keep this sending device and NovaLauncher running.", 0, preview.TotalBytes);
         }
         finally { _gate.Release(); }
     }
 
-    public async Task<IReadOnlyList<PeerGameTransferOffer>> RefreshOffersAsync(CancellationToken cancellationToken)
+    public async Task<GameTransferOfferRefreshResult> RefreshOffersAsync(CancellationToken cancellationToken)
     {
         var offers = new List<PeerGameTransferOffer>();
+        var failures = new List<string>();
         foreach (var peer in saveSync.Settings.EffectiveTrustedPeers.Where(static peer => peer.State == TrustedPeerState.Active).OrderBy(static peer => peer.DeviceId))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            foreach (var manifest in await transport.ListGameTransferOffersAsync(peer, cancellationToken).ConfigureAwait(false))
-                if (ValidateManifest(manifest, peer.DeviceId, out _)) offers.Add(new(peer, manifest));
+            try
+            {
+                foreach (var manifest in await transport.ListGameTransferOffersAsync(peer, cancellationToken).ConfigureAwait(false))
+                {
+                    if (ValidateManifest(manifest, peer.DeviceId, out var error)) offers.Add(new(peer, manifest));
+                    else failures.Add($"{peer.DisplayName}: rejected an invalid offer ({error})");
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                failures.Add($"{peer.DisplayName}: {exception.Message}");
+            }
         }
-        return offers.OrderBy(static item => item.Manifest.PackageName, StringComparer.OrdinalIgnoreCase).Take(MaximumOffers * SaveSyncSettings.MaximumTrustedPeers).ToArray();
+        return new(
+            offers.OrderBy(static item => item.Manifest.PackageName, StringComparer.OrdinalIgnoreCase).Take(MaximumOffers * SaveSyncSettings.MaximumTrustedPeers).ToArray(),
+            failures);
     }
 
     public async Task<GameTransferResult> DownloadAsync(PeerGameTransferOffer offer, string destination, IProgress<GameTransferProgress>? progress, CancellationToken cancellationToken)
