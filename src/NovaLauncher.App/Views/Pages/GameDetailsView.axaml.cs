@@ -5,6 +5,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using NovaLauncher.Application.Enrichment;
 using NovaLauncher.Application.SaveSync;
+using NovaLauncher.Domain.Library;
 
 namespace NovaLauncher.App.Views.Pages;
 
@@ -34,12 +35,32 @@ public sealed partial class GameDetailsView : NovaPage
     private async void OnSyncSelectedGameNow(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.SyncSelectedGameNowAsync(LifetimeToken));
     private async void OnGenerateSaveSyncLink(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.GenerateSaveSyncLinkAsync(LifetimeToken));
     private async void OnLinkSaveAutomatically(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.LinkSaveAutomaticallyAsync(LifetimeToken));
+    private async void OnAddSaveDestination(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.AddSelectedSaveDestinationAsync(LifetimeToken));
+    private async void OnRemoveSaveDestination(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RemoveSelectedSaveDestinationAsync(LifetimeToken));
+    private async void OnUseAllSaveDestinations(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.UseAllSaveDestinationsAsync(LifetimeToken));
     private async void OnApplySaveSyncLink(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ApplySaveSyncLinkAsync(LifetimeToken));
     private async void OnRefreshSnapshotHistory(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RefreshSelectedSnapshotHistoryAsync(LifetimeToken));
+    private async void OnVerifySnapshotIntegrity(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.VerifySelectedSnapshotsAsync(LifetimeToken));
     private async void OnRestoreSelectedSnapshot(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RestoreSelectedSnapshotAsync(LifetimeToken));
     private async void OnKeepLocalSave(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ResolveSaveConflictAsync(SaveConflictChoice.KeepLocal, LifetimeToken));
     private async void OnKeepRemoteSave(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ResolveSaveConflictAsync(SaveConflictChoice.KeepRemote, LifetimeToken));
     private async void OnKeepBothSaves(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ResolveSaveConflictAsync(SaveConflictChoice.KeepBoth, LifetimeToken));
+    private async void OnCompareSaveConflict(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RefreshSaveConflictComparisonAsync(LifetimeToken));
+    private void OnNewLaunchAction(object? sender, RoutedEventArgs e) => Workspace.BeginNewLaunchAction();
+    private async void OnSaveLaunchAction(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.SaveLaunchActionAsync(LifetimeToken));
+    private async void OnRemoveLaunchAction(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RemoveSelectedLaunchActionAsync(LifetimeToken));
+
+    private async void OnLaunchAction(object? sender, RoutedEventArgs e)
+    { if (sender is Button { DataContext: GameLaunchAction action }) await ExecuteAsync(() => Workspace.LaunchSelectedActionAsync(action, LifetimeToken)); }
+
+    private async void OnChooseLaunchActionTarget(object? sender, RoutedEventArgs e)
+    {
+        var files = await Storage.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Choose launch action executable", AllowMultiple = false, FileTypeFilter = [WindowsExecutableFileType] });
+        var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
+        if (string.IsNullOrWhiteSpace(path)) return;
+        Workspace.LaunchActionTarget = path;
+        if (string.IsNullOrWhiteSpace(Workspace.LaunchActionWorkingDirectory)) Workspace.LaunchActionWorkingDirectory = Path.GetDirectoryName(path) ?? string.Empty;
+    }
 
     private async void OnConfirmGameIdentity(object? sender, RoutedEventArgs e)
     { if (sender is Button { DataContext: GameIdentityCandidate candidate }) await ExecuteAsync(() => Workspace.ConfirmSelectedGameIdentityAsync(candidate, LifetimeToken)); }

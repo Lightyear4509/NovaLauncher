@@ -19,4 +19,6 @@ public sealed record LibraryItem(
     string? SaveDirectory = null,
     Guid? SaveSyncId = null,
     string? SaveSyncLabel = null,
-    LinkedGameIdentity? LinkedIdentity = null);
+    LinkedGameIdentity? LinkedIdentity = null,
+    IReadOnlyList<Guid>? SaveSyncPeerIds = null,
+    IReadOnlyList<GameLaunchAction>? LaunchActions = null);

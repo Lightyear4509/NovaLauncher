@@ -183,7 +183,8 @@ internal static class Program
         services.AddSingleton<TailscaleTcpTransport>(provider => new TailscaleTcpTransport(
             () => provider.GetRequiredService<ISaveSyncService>().Settings,
             provider.GetRequiredService<IPairingSecretStore>(),
-            peerCredentials: provider.GetRequiredService<IPeerCredentialStore>()));
+            peerCredentials: provider.GetRequiredService<IPeerCredentialStore>(),
+            resumeRoot: Path.Combine(dataRoot, "SaveSync", "Downloads")));
         services.AddSingleton<ISaveSyncTransport>(provider => provider.GetRequiredService<TailscaleTcpTransport>());
         services.AddSingleton<IPeerGameTransferTransport>(provider => provider.GetRequiredService<TailscaleTcpTransport>());
         services.AddSingleton<IReceivedContentScanner, WindowsDefenderContentScanner>();

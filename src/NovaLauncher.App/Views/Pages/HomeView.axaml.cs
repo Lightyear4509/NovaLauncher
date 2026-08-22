@@ -10,6 +10,10 @@ public sealed partial class HomeView : NovaPage
     public HomeView() => AvaloniaXamlLoader.Load(this);
 
     private void OnShowLibrary(object? sender, RoutedEventArgs e) => Workspace.NavigateTo("Library");
+    private void OnShowSaves(object? sender, RoutedEventArgs e) => Workspace.NavigateTo("Saves");
+    private void OnToggleHomeSection(object? sender, RoutedEventArgs e) => Workspace.ToggleSelectedHomeSection();
+    private void OnMoveHomeSectionUp(object? sender, RoutedEventArgs e) => Workspace.MoveSelectedHomeSection(-1);
+    private void OnMoveHomeSectionDown(object? sender, RoutedEventArgs e) => Workspace.MoveSelectedHomeSection(1);
 
     private void OnOpenGameDetails(object? sender, RoutedEventArgs e)
     {

@@ -20,13 +20,20 @@ public sealed class SaveSyncCoordinator(
     public const long MaximumSnapshotBytes = 512L * 1024 * 1024;
     public const int MaximumRetainedSnapshotsPerGame = 20;
     public const int MaximumRetainedRestoreBackupsPerGame = 10;
+    public const int SaveTransferChunkBytes = 1024 * 1024;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _identityGate = new(1, 1);
     private SaveSyncDocument _document = SaveSyncDocument.CreateDefault();
     private readonly string _snapshotRoot = Path.Combine(dataRoot, "SaveSync", "Snapshots");
+    private readonly string _incomingRoot = Path.Combine(dataRoot, "SaveSync", "Incoming");
     private readonly TimeSpan _quietPeriod = quietPeriod ?? TimeSpan.FromSeconds(2);
 
     public SaveSyncSettings Settings => _document.Settings;
+    public event Action<SaveTransferProgress>? TransferProgressChanged
+    {
+        add => transport.ProgressChanged += value;
+        remove => transport.ProgressChanged -= value;
+    }
     public bool IsPaired => ActivePeers().Length > 0;
     public bool IsListening => transport.IsListening;
     public string ListenerStatus => transport.ListenerStatus;
@@ -107,8 +114,13 @@ public sealed class SaveSyncCoordinator(
                 {
                     var payload = await LoadSnapshotAsync(pending.GameId, pending.HeadSnapshotId!.Value, fullContent: false, cancellationToken).ConfigureAwait(false);
                     if (payload is null) continue;
-                    var pushed = await PushToActivePeersAsync(payload, cancellationToken).ConfigureAwait(false);
-                    if (pushed.Success) await SetStateAsync(pending with { Status = "Synchronized" }, cancellationToken).ConfigureAwait(false);
+                    var pushed = await PushToActivePeersAsync(payload, pending.DestinationPeerIds, cancellationToken).ConfigureAwait(false);
+                    await SetStateAsync(pending with
+                    {
+                        Status = pushed.Success ? "Synchronized" : "Pending upload",
+                        LastSuccessAtUtc = pushed.Success ? timeProvider.GetUtcNow() : pending.LastSuccessAtUtc,
+                        LastError = pushed.Success ? null : pushed.Error ?? "The queued snapshot was not acknowledged.",
+                    }, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (InvalidOperationException exception) { return $"Save sync is configured but inactive: {exception.Message}"; }
@@ -222,8 +234,59 @@ public sealed class SaveSyncCoordinator(
         MutateTrustedPeerAsync(peerDeviceId, peer => peer with { State = paused ? TrustedPeerState.Paused : TrustedPeerState.Active },
             paused ? "The trusted device could not be paused." : "The trusted device could not be resumed.", cancellationToken);
 
-    public Task<string?> RotatePeerCredentialAsync(Guid peerDeviceId, CancellationToken cancellationToken) =>
-        Task.FromResult<string?>("Credential rotation requires the peer to be online and is not available until the authenticated rotation handshake is completed.");
+    public async Task<string?> RotatePeerCredentialAsync(Guid peerDeviceId, CancellationToken cancellationToken)
+    {
+        if (peerCredentials is null) return "Independent peer credential storage is unavailable.";
+        var peer = Settings.EffectiveTrustedPeers.FirstOrDefault(candidate => candidate.DeviceId == peerDeviceId);
+        if (peer is not { State: TrustedPeerState.Active }) return "Choose an active trusted device before rotating its credential.";
+        var replacement = RandomNumberGenerator.GetBytes(32);
+        try
+        {
+            peerCredentials.SetPendingSecret(peerDeviceId, replacement);
+            var error = await transport.RotatePeerCredentialAsync(peer, replacement, cancellationToken).ConfigureAwait(false);
+            if (error is not null) return error + " The staged credential was retained so a retry can recover safely.";
+            peerCredentials.PromotePendingSecret(peerDeviceId);
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException)
+        {
+            return $"Credential rotation stopped safely: {exception.Message}";
+        }
+        finally { CryptographicOperations.ZeroMemory(replacement); }
+    }
+
+    public async Task<string?> PrepareCredentialRotationAsync(Guid requestingDeviceId, byte[] newSecret, CancellationToken cancellationToken)
+    {
+        if (peerCredentials is null) return "Independent peer credential storage is unavailable.";
+        if (!await AuthorizePeerAsync(requestingDeviceId, cancellationToken).ConfigureAwait(false)) return "The requesting device is not trusted.";
+        if (newSecret.Length != 32) return "The replacement credential is invalid.";
+        try { peerCredentials.SetPendingSecret(requestingDeviceId, newSecret); return null; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException)
+        { return $"The replacement credential could not be staged: {exception.Message}"; }
+    }
+
+    public async Task<string?> CommitCredentialRotationAsync(Guid requestingDeviceId, CancellationToken cancellationToken)
+    {
+        if (peerCredentials is null) return "Independent peer credential storage is unavailable.";
+        if (!await AuthorizePeerAsync(requestingDeviceId, cancellationToken).ConfigureAwait(false)) return "The requesting device is not trusted.";
+        if (!peerCredentials.ContainsPendingSecret(requestingDeviceId)) return "No staged replacement credential exists.";
+        try { peerCredentials.PromotePendingSecret(requestingDeviceId); return null; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException)
+        { return $"The staged credential could not be committed: {exception.Message}"; }
+    }
+
+    public async Task<string?> CancelIncomingPartialTransfersAsync(Guid requestingDeviceId, CancellationToken cancellationToken)
+    {
+        if (!await AuthorizePeerAsync(requestingDeviceId, cancellationToken).ConfigureAwait(false)) return "The requesting device is not trusted.";
+        try
+        {
+            var root = Path.Combine(_incomingRoot, requestingDeviceId.ToString("N"));
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        { return $"Incoming partial save data could not be removed: {exception.Message}"; }
+    }
 
     public async Task<string?> RevokePeerAsync(Guid peerDeviceId, CancellationToken cancellationToken)
     {
@@ -287,6 +350,8 @@ public sealed class SaveSyncCoordinator(
         catch (InvalidOperationException exception) { return exception.Message; }
     }
 
+    public Task<string?> CancelPartialTransfersAsync(CancellationToken cancellationToken) => transport.CancelPartialTransfersAsync(cancellationToken);
+
     public (Guid? Identity, string? Error) DeriveSharedSaveIdentity(string label, string platform)
     {
         if (!IsPaired) return (null, "Pair the devices before linking a game automatically.");
@@ -317,9 +382,13 @@ public sealed class SaveSyncCoordinator(
             cancellationToken.ThrowIfCancellationRequested();
             var payload = await LoadSnapshotAsync(pending.GameId, pending.HeadSnapshotId!.Value, fullContent: false, cancellationToken).ConfigureAwait(false);
             if (payload is null) continue;
-            var pushed = await PushToActivePeersAsync(payload, cancellationToken).ConfigureAwait(false);
-            if (!pushed.Success) continue;
-            await SetStateAsync(pending with { Status = "Peer acknowledged" }, cancellationToken).ConfigureAwait(false);
+            var pushed = await PushToActivePeersAsync(payload, pending.DestinationPeerIds, cancellationToken).ConfigureAwait(false);
+            if (!pushed.Success)
+            {
+                await SetStateAsync(pending with { LastError = pushed.Error ?? "The queued snapshot was not acknowledged." }, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+            await SetStateAsync(pending with { Status = "Peer acknowledged", LastSuccessAtUtc = timeProvider.GetUtcNow(), LastError = null }, cancellationToken).ConfigureAwait(false);
             completed++;
         }
         return completed;
@@ -343,11 +412,11 @@ public sealed class SaveSyncCoordinator(
                 (state is not null && !FileSetsEqual(local, state.LastObservedFiles)))
             {
                 await StoreConflictAsync(pull.Snapshot, cancellationToken).ConfigureAwait(false);
-                await SetStateAsync((state ?? new(syncGameId, null, local, "Conflict")) with { Status = "Conflict", ConflictSnapshotId = pull.Snapshot.Manifest.SnapshotId.ToString("N") }, cancellationToken).ConfigureAwait(false);
+                await SetStateAsync((state ?? new(syncGameId, null, local, "Conflict")) with { Status = "Conflict", ConflictSnapshotId = pull.Snapshot.Manifest.SnapshotId.ToString("N"), LastError = "Both devices changed this save." }, cancellationToken).ConfigureAwait(false);
                 return new(SaveSyncStatus.Conflict, "Both devices changed this save. Nothing was overwritten; resolve the conflict before launch.", pull.Snapshot.Manifest.SnapshotId);
             }
             await RestoreAtomicallyAsync(game.SaveDirectory!, pull.Snapshot, cancellationToken).ConfigureAwait(false);
-            await SetStateAsync(new(syncGameId, pull.Snapshot.Manifest.SnapshotId, pull.Snapshot.Manifest.Files, "Downloaded"), cancellationToken).ConfigureAwait(false);
+            await SetStateAsync(new(syncGameId, pull.Snapshot.Manifest.SnapshotId, pull.Snapshot.Manifest.Files, "Downloaded", LastSuccessAtUtc: timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
             return new(SaveSyncStatus.Applied, "A verified peer snapshot was restored after creating a local backup.", pull.Snapshot.Manifest.SnapshotId);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException or InvalidDataException)
@@ -372,11 +441,11 @@ public sealed class SaveSyncCoordinator(
             if (state is not null && FileSetsEqual(files, state.LastObservedFiles)) return new(SaveSyncStatus.Unchanged, "No save changes were detected.");
             var payload = await CreatePayloadAsync(game, state, files, cancellationToken).ConfigureAwait(false);
             await StoreSnapshotAsync(payload, cancellationToken).ConfigureAwait(false);
-            await SetStateAsync(new(payload.Manifest.GameId, payload.Manifest.SnapshotId, files, "Pending upload"), cancellationToken).ConfigureAwait(false);
+            await SetStateAsync(new(payload.Manifest.GameId, payload.Manifest.SnapshotId, files, "Pending upload", DestinationPeerIds: game.SaveSyncPeerIds, LastSuccessAtUtc: state?.LastSuccessAtUtc, LastError: "Waiting for an active trusted device."), cancellationToken).ConfigureAwait(false);
             if (!transport.IsConfigured || !IsPaired) return new(SaveSyncStatus.QueuedOffline, "A local snapshot was created and queued until the peer is available.", payload.Manifest.SnapshotId);
-            var push = await PushToActivePeersAsync(payload, cancellationToken).ConfigureAwait(false);
+            var push = await PushToActivePeersAsync(payload, game.SaveSyncPeerIds, cancellationToken).ConfigureAwait(false);
             var status = push.Success ? "Peer acknowledged" : push.Conflict ? "Conflict" : "Pending upload";
-            await SetStateAsync(new(payload.Manifest.GameId, payload.Manifest.SnapshotId, files, status, push.Conflict ? payload.Manifest.SnapshotId.ToString("N") : null), cancellationToken).ConfigureAwait(false);
+            await SetStateAsync(new(payload.Manifest.GameId, payload.Manifest.SnapshotId, files, status, push.Conflict ? payload.Manifest.SnapshotId.ToString("N") : null, game.SaveSyncPeerIds, push.Success ? timeProvider.GetUtcNow() : state?.LastSuccessAtUtc, push.Success ? null : push.Error ?? "The snapshot remains queued."), cancellationToken).ConfigureAwait(false);
             return push.Success
                 ? new(SaveSyncStatus.SnapshotCreated, "Only changed save files were encrypted and sent to the paired peer.", payload.Manifest.SnapshotId)
                 : new(push.Conflict ? SaveSyncStatus.Conflict : SaveSyncStatus.QueuedOffline, push.Error ?? "The snapshot remains queued.", payload.Manifest.SnapshotId);
@@ -403,7 +472,7 @@ public sealed class SaveSyncCoordinator(
             {
                 await RestoreAtomicallyAsync(game.SaveDirectory!, remote, cancellationToken).ConfigureAwait(false);
                 await StoreSnapshotAsync(remote, cancellationToken).ConfigureAwait(false);
-                await SetStateAsync(new(syncGameId, remote.Manifest.SnapshotId, remote.Manifest.Files, "Synchronized"), cancellationToken).ConfigureAwait(false);
+                await SetStateAsync(new(syncGameId, remote.Manifest.SnapshotId, remote.Manifest.Files, "Synchronized", LastSuccessAtUtc: timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
                 return new(SaveSyncStatus.Applied, "The verified remote save was restored; the prior local files remain in NovaLauncher's backup history.", remote.Manifest.SnapshotId);
             }
 
@@ -418,14 +487,41 @@ public sealed class SaveSyncCoordinator(
             var baseState = new SaveSyncGameState(syncGameId, remote.Manifest.SnapshotId, remote.Manifest.Files, "Resolving local");
             var localPayload = await CreatePayloadAsync(game, baseState, local, cancellationToken).ConfigureAwait(false);
             await StoreSnapshotAsync(localPayload, cancellationToken).ConfigureAwait(false);
-            var pushed = await PushToActivePeersAsync(localPayload, cancellationToken).ConfigureAwait(false);
-            await SetStateAsync(new(syncGameId, localPayload.Manifest.SnapshotId, local, pushed.Success ? "Peer acknowledged" : "Pending upload"), cancellationToken).ConfigureAwait(false);
+            var pushed = await PushToActivePeersAsync(localPayload, game.SaveSyncPeerIds, cancellationToken).ConfigureAwait(false);
+            await SetStateAsync(new(syncGameId, localPayload.Manifest.SnapshotId, local, pushed.Success ? "Peer acknowledged" : "Pending upload", DestinationPeerIds: game.SaveSyncPeerIds, LastSuccessAtUtc: pushed.Success ? timeProvider.GetUtcNow() : state.LastSuccessAtUtc, LastError: pushed.Success ? null : pushed.Error ?? "The local choice remains queued."), cancellationToken).ConfigureAwait(false);
             return new(pushed.Success ? SaveSyncStatus.SnapshotCreated : SaveSyncStatus.QueuedOffline,
                 pushed.Success ? "The local save was chosen and sent as a new generation; the remote conflict remains retained." : "The local choice was queued until the peer is available.", localPayload.Manifest.SnapshotId);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException or InvalidDataException)
         { return new(SaveSyncStatus.Failed, exception.Message); }
         finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<SaveConflictComparisonItem>> GetConflictComparisonAsync(LibraryItem game, CancellationToken cancellationToken)
+    {
+        var validation = ValidateGame(game);
+        if (validation is not null) return [];
+        var state = FindState(GetSyncGameId(game));
+        if (state?.ConflictSnapshotId is null || !Guid.TryParse(state.ConflictSnapshotId, out var conflictId)) return [];
+        try
+        {
+            var remote = await LoadConflictAsync(GetSyncGameId(game), conflictId, cancellationToken).ConfigureAwait(false);
+            if (remote is null) return [];
+            var local = (await ScanAsync(game.SaveDirectory!, cancellationToken).ConfigureAwait(false)).ToDictionary(static file => file.RelativePath, StringComparer.OrdinalIgnoreCase);
+            var remoteFiles = remote.Manifest.Files.ToDictionary(static file => file.RelativePath, StringComparer.OrdinalIgnoreCase);
+            return local.Keys.Union(remoteFiles.Keys, StringComparer.OrdinalIgnoreCase)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .Select(path =>
+                {
+                    var hasLocal = local.TryGetValue(path, out var localFile);
+                    var hasRemote = remoteFiles.TryGetValue(path, out var remoteFile);
+                    var difference = !hasLocal ? "Remote only" : !hasRemote ? "Local only" : localFile!.Sha256 == remoteFile!.Sha256 ? "Identical" : "Changed";
+                    return new SaveConflictComparisonItem(path, hasLocal ? localFile!.Length : null, hasRemote ? remoteFile!.Length : null, difference);
+                })
+                .ToArray();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        { return [new("Comparison unavailable", null, null, exception.Message)]; }
     }
 
     public async Task<TransportResult> ReceivePushAsync(SaveSnapshotPayload snapshot, CancellationToken cancellationToken)
@@ -547,6 +643,175 @@ public sealed class SaveSyncCoordinator(
             : new(true, false, head, null);
     }
 
+    public async Task<SavePushBeginResult> BeginIncomingSnapshotAsync(
+        Guid requestingDeviceId,
+        SaveSnapshotManifest manifest,
+        IReadOnlyList<string> changedPaths,
+        CancellationToken cancellationToken)
+    {
+        if (!await AuthorizePeerAsync(requestingDeviceId, cancellationToken).ConfigureAwait(false))
+            return new(false, new Dictionary<string, long>(), "The sending device is not trusted.");
+        try
+        {
+            ValidatePayload(new(manifest, new Dictionary<string, byte[]>()));
+            if (manifest.DeviceId != requestingDeviceId || changedPaths.Count > manifest.Files.Count ||
+                changedPaths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != changedPaths.Count ||
+                changedPaths.Any(path => !manifest.Files.Any(file => string.Equals(file.RelativePath, path, StringComparison.OrdinalIgnoreCase))))
+                return new(false, new Dictionary<string, long>(), "The incoming snapshot manifest or changed-file list is invalid.");
+            var stage = IncomingSnapshotDirectory(requestingDeviceId, manifest.SnapshotId);
+            Directory.CreateDirectory(stage);
+            var manifestPath = Path.Combine(stage, "manifest.txt");
+            var changedPath = Path.Combine(stage, "changed.json");
+            var serializedManifest = SerializeManifest(manifest);
+            if (File.Exists(manifestPath) && !string.Equals(await File.ReadAllTextAsync(manifestPath, cancellationToken).ConfigureAwait(false), serializedManifest, StringComparison.Ordinal))
+                return new(false, new Dictionary<string, long>(), "A different manifest already uses this incoming snapshot identity.");
+            await File.WriteAllTextAsync(manifestPath, serializedManifest, cancellationToken).ConfigureAwait(false);
+            await File.WriteAllTextAsync(changedPath, System.Text.Json.JsonSerializer.Serialize(changedPaths), cancellationToken).ConfigureAwait(false);
+            var offsets = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in changedPaths)
+            {
+                var expected = manifest.Files.First(file => string.Equals(file.RelativePath, path, StringComparison.OrdinalIgnoreCase));
+                var partial = SafeCombine(Path.Combine(stage, "files"), path);
+                var length = File.Exists(partial) ? new FileInfo(partial).Length : 0;
+                if (length > expected.Length) return new(false, new Dictionary<string, long>(), $"The staged partial file for {path} exceeds its manifest length.");
+                offsets[path] = length;
+            }
+            return new(true, offsets, null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            return new(false, new Dictionary<string, long>(), $"The incoming snapshot could not be staged: {exception.Message}");
+        }
+    }
+
+    public async Task<SavePushChunkResult> ReceiveIncomingSnapshotChunkAsync(
+        Guid requestingDeviceId,
+        Guid snapshotId,
+        string relativePath,
+        long offset,
+        byte[] bytes,
+        CancellationToken cancellationToken)
+    {
+        if (!await AuthorizePeerAsync(requestingDeviceId, cancellationToken).ConfigureAwait(false)) return new(false, offset, "The sending device is not trusted.");
+        if (snapshotId == Guid.Empty || !IsSafeRelativePath(relativePath) || bytes.Length is <= 0 or > SaveTransferChunkBytes) return new(false, offset, "The save chunk is invalid.");
+        try
+        {
+            var stage = IncomingSnapshotDirectory(requestingDeviceId, snapshotId);
+            var manifestPath = Path.Combine(stage, "manifest.txt");
+            var changedPath = Path.Combine(stage, "changed.json");
+            if (!File.Exists(manifestPath) || !File.Exists(changedPath)) return new(false, offset, "Begin the incoming snapshot before sending chunks.");
+            var manifest = ParseManifest(await File.ReadAllTextAsync(manifestPath, cancellationToken).ConfigureAwait(false));
+            var changed = System.Text.Json.JsonSerializer.Deserialize<string[]>(await File.ReadAllTextAsync(changedPath, cancellationToken).ConfigureAwait(false)) ?? [];
+            var expected = manifest.Files.FirstOrDefault(file => string.Equals(file.RelativePath, relativePath, StringComparison.OrdinalIgnoreCase));
+            if (expected is null || !changed.Contains(relativePath, StringComparer.OrdinalIgnoreCase)) return new(false, offset, "The chunk path is not authorized by the manifest.");
+            var partial = SafeCombine(Path.Combine(stage, "files"), relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(partial)!);
+            var current = File.Exists(partial) ? new FileInfo(partial).Length : 0;
+            if (offset != current) return new(false, current, "The chunk offset does not match the durable resume position.");
+            if (current + bytes.LongLength > expected.Length) return new(false, current, "The chunk exceeds the manifest file length.");
+            await using var stream = new FileStream(partial, FileMode.Append, FileAccess.Write, FileShare.None, SaveTransferChunkBytes, true);
+            await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            return new(true, current + bytes.LongLength, null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            return new(false, offset, $"The save chunk could not be staged: {exception.Message}");
+        }
+    }
+
+    public async Task<TransportResult> CompleteIncomingSnapshotAsync(Guid requestingDeviceId, Guid snapshotId, CancellationToken cancellationToken)
+    {
+        if (!await AuthorizePeerAsync(requestingDeviceId, cancellationToken).ConfigureAwait(false)) return new(false, false, null, "The sending device is not trusted.");
+        var stage = IncomingSnapshotDirectory(requestingDeviceId, snapshotId);
+        try
+        {
+            var manifest = ParseManifest(await File.ReadAllTextAsync(Path.Combine(stage, "manifest.txt"), cancellationToken).ConfigureAwait(false));
+            var changed = System.Text.Json.JsonSerializer.Deserialize<string[]>(await File.ReadAllTextAsync(Path.Combine(stage, "changed.json"), cancellationToken).ConfigureAwait(false)) ?? [];
+            var files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in changed)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var entry = manifest.Files.First(file => string.Equals(file.RelativePath, path, StringComparison.OrdinalIgnoreCase));
+                var partial = SafeCombine(Path.Combine(stage, "files"), path);
+                if (!File.Exists(partial) || new FileInfo(partial).Length != entry.Length ||
+                    !string.Equals(await HashFileAsync(partial, cancellationToken).ConfigureAwait(false), entry.Sha256, StringComparison.Ordinal))
+                    return new(false, false, null, $"The staged save file {path} is incomplete or failed hash verification.");
+                files[path] = await File.ReadAllBytesAsync(partial, cancellationToken).ConfigureAwait(false);
+            }
+            var result = await ReceivePushAsync(new(manifest, files), cancellationToken).ConfigureAwait(false);
+            if (result.Success && Directory.Exists(stage)) Directory.Delete(stage, true);
+            return result;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            return new(false, false, null, $"The staged snapshot could not be completed: {exception.Message}");
+        }
+    }
+
+    public async Task<SavePullBeginResult> BeginOutgoingSnapshotAsync(Guid requestingDeviceId, GameId gameId, Guid? knownHead, CancellationToken cancellationToken)
+    {
+        if (!await AuthorizePeerAsync(requestingDeviceId, cancellationToken).ConfigureAwait(false)) return new(false, null, "The requesting device is not trusted.");
+        if (gameId.Value == Guid.Empty) return new(false, null, "The requested game identity is invalid.");
+        try
+        {
+            var gameRoot = Path.Combine(_snapshotRoot, gameId.Value.ToString("N"));
+            var headPath = Path.Combine(gameRoot, "head.txt");
+            if (!File.Exists(headPath) || !Guid.TryParse(await File.ReadAllTextAsync(headPath, cancellationToken).ConfigureAwait(false), out var head) || head == knownHead)
+                return new(true, null, null);
+            var manifestPath = Path.Combine(SnapshotDirectory(gameId, head), "manifest.txt");
+            if (!File.Exists(manifestPath)) return new(false, null, "The current snapshot manifest is unavailable.");
+            var manifest = ParseManifest(await File.ReadAllTextAsync(manifestPath, cancellationToken).ConfigureAwait(false));
+            ValidatePayload(new(manifest, new Dictionary<string, byte[]>()));
+            return new(true, manifest, null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            return new(false, null, $"The outgoing snapshot could not be prepared: {exception.Message}");
+        }
+    }
+
+    public async Task<SavePullChunkResult> ReadOutgoingSnapshotChunkAsync(
+        Guid requestingDeviceId,
+        Guid snapshotId,
+        string relativePath,
+        long offset,
+        int maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        if (!await AuthorizePeerAsync(requestingDeviceId, cancellationToken).ConfigureAwait(false)) return new(false, null, false, "The requesting device is not trusted.");
+        if (snapshotId == Guid.Empty || !IsSafeRelativePath(relativePath) || offset < 0 || maximumBytes is <= 0 or > SaveTransferChunkBytes)
+            return new(false, null, false, "The requested save chunk is invalid.");
+        try
+        {
+            var snapshotDirectories = Directory.Exists(_snapshotRoot)
+                ? Directory.EnumerateDirectories(_snapshotRoot)
+                    .Where(root => Guid.TryParse(Path.GetFileName(root), out _))
+                    .Select(root => Path.Combine(root, snapshotId.ToString("N")))
+                    .Where(Directory.Exists)
+                    .Take(2)
+                    .ToArray()
+                : [];
+            if (snapshotDirectories.Length != 1) return new(false, null, false, "The requested snapshot is unavailable or ambiguous.");
+            var directory = snapshotDirectories[0];
+            var manifest = ParseManifest(await File.ReadAllTextAsync(Path.Combine(directory, "manifest.txt"), cancellationToken).ConfigureAwait(false));
+            var entry = manifest.Files.FirstOrDefault(file => string.Equals(file.RelativePath, relativePath, StringComparison.OrdinalIgnoreCase));
+            if (entry is null || offset > entry.Length) return new(false, null, false, "The requested file or offset is not in the snapshot manifest.");
+            var path = SafeCombine(directory, relativePath);
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, SaveTransferChunkBytes, true);
+            if (stream.Length != entry.Length) return new(false, null, false, "The retained file length no longer matches its manifest.");
+            stream.Position = offset;
+            var bytes = new byte[Math.Min(maximumBytes, (int)(entry.Length - offset))];
+            var read = bytes.Length == 0 ? 0 : await stream.ReadAsync(bytes, cancellationToken).ConfigureAwait(false);
+            if (read != bytes.Length) Array.Resize(ref bytes, read);
+            return new(true, bytes, offset + read == entry.Length, null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            return new(false, null, false, $"The save chunk could not be read: {exception.Message}");
+        }
+    }
+
     public async Task<IReadOnlyList<SaveSnapshotHistoryItem>> GetSnapshotHistoryAsync(GameId gameId, CancellationToken cancellationToken)
     {
         if (gameId.Value == Guid.Empty) return [];
@@ -582,6 +847,29 @@ public sealed class SaveSyncCoordinator(
             }
         }
         return history.OrderByDescending(static item => item.CreatedAtUtc).ThenByDescending(static item => item.SnapshotId).ToArray();
+    }
+
+    public async Task<SaveSyncResult> VerifySnapshotsAsync(GameId gameId, CancellationToken cancellationToken)
+    {
+        if (gameId.Value == Guid.Empty) return new(SaveSyncStatus.Failed, "Choose a valid linked game before checking integrity.");
+        try
+        {
+            var history = await GetSnapshotHistoryAsync(gameId, cancellationToken).ConfigureAwait(false);
+            if (history.Count == 0) return new(SaveSyncStatus.Unchanged, "No retained snapshots need verification.");
+            var corrupt = history.Where(static item => !item.IntegrityValid).ToArray();
+            if (corrupt.Length == 0) return new(SaveSyncStatus.Unchanged, $"Verified {history.Count} retained snapshot(s); every manifest and file hash is valid.");
+            var head = corrupt.Any(static item => item.IsHead);
+            return new(
+                SaveSyncStatus.Failed,
+                head
+                    ? $"Integrity failed for {corrupt.Length} snapshot(s), including the current head. Nothing was changed; do not restore or synchronize this game until it is repaired."
+                    : $"Integrity failed for {corrupt.Length} historical snapshot(s). The current head remains valid and nothing was changed.",
+                corrupt.FirstOrDefault(static item => item.IsHead)?.SnapshotId);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new(SaveSyncStatus.Failed, $"Snapshot verification could not finish: {exception.Message}");
+        }
     }
 
     public async Task<SaveSyncResult> RestoreSnapshotAsync(LibraryItem game, Guid snapshotId, CancellationToken cancellationToken)
@@ -888,9 +1176,14 @@ public sealed class SaveSyncCoordinator(
         .OrderBy(peer => peer.DeviceId)
         .ToArray();
 
-    private async Task<TransportResult> PushToActivePeersAsync(SaveSnapshotPayload payload, CancellationToken cancellationToken)
+    private async Task<TransportResult> PushToActivePeersAsync(SaveSnapshotPayload payload, IReadOnlyList<Guid>? destinationPeerIds, CancellationToken cancellationToken)
     {
         var peers = ActivePeers();
+        if (destinationPeerIds is { Count: > 0 })
+        {
+            var requested = destinationPeerIds.ToHashSet();
+            peers = peers.Where(peer => requested.Contains(peer.DeviceId)).ToArray();
+        }
         if (peers.Length == 0) return new(false, false, null, "No active trusted save-sync device is available.");
         var failures = new List<string>();
         foreach (var peer in peers)
@@ -968,6 +1261,7 @@ public sealed class SaveSyncCoordinator(
         finally { _identityGate.Release(); }
     }
     private string SnapshotDirectory(GameId gameId, Guid id) => Path.Combine(_snapshotRoot, gameId.Value.ToString("N"), id.ToString("N"));
+    private string IncomingSnapshotDirectory(Guid deviceId, Guid snapshotId) => Path.Combine(_incomingRoot, deviceId.ToString("N"), snapshotId.ToString("N"));
     private void EnforceSnapshotRetention(GameId gameId, Guid headSnapshotId)
     {
         var gameRoot = Path.Combine(_snapshotRoot, gameId.Value.ToString("N"));

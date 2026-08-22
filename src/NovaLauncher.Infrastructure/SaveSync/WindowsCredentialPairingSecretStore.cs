@@ -9,6 +9,7 @@ public sealed class WindowsCredentialPairingSecretStore : IPairingSecretStore, I
 {
     private const string Target = "NovaLauncher/SaveSyncPairingSecret";
     private const string PeerTargetPrefix = "NovaLauncher/SaveSyncPeer/";
+    private const string PendingPeerTargetPrefix = "NovaLauncher/SaveSyncPeerPending/";
     public bool HasSecret => ReadSecret(Target) is { Length: 32 };
 
     public byte[]? GetSecret() => ReadSecret(Target);
@@ -65,6 +66,25 @@ public sealed class WindowsCredentialPairingSecretStore : IPairingSecretStore, I
 
     public string GetCredentialReference(Guid peerDeviceId) => GetTarget(peerDeviceId);
 
+    public bool ContainsPendingSecret(Guid peerDeviceId) => GetPendingSecret(peerDeviceId) is { Length: 32 };
+
+    public byte[]? GetPendingSecret(Guid peerDeviceId) => ReadSecret(GetPendingTarget(peerDeviceId));
+
+    public void SetPendingSecret(Guid peerDeviceId, ReadOnlySpan<byte> secret) => WriteSecret(GetPendingTarget(peerDeviceId), secret);
+
+    public void PromotePendingSecret(Guid peerDeviceId)
+    {
+        var pending = GetPendingSecret(peerDeviceId) ?? throw new CryptographicException("The staged peer credential is unavailable.");
+        try
+        {
+            WriteSecret(GetTarget(peerDeviceId), pending);
+            DeleteSecret(GetPendingTarget(peerDeviceId));
+        }
+        finally { CryptographicOperations.ZeroMemory(pending); }
+    }
+
+    public void ClearPendingSecret(Guid peerDeviceId) => DeleteSecret(GetPendingTarget(peerDeviceId));
+
     private static void DeleteSecret(string target)
     {
         if (OperatingSystem.IsWindows() && !CredDelete(target, 1, 0) && Marshal.GetLastWin32Error() != 1168)
@@ -75,6 +95,12 @@ public sealed class WindowsCredentialPairingSecretStore : IPairingSecretStore, I
     {
         if (peerDeviceId == Guid.Empty) throw new ArgumentException("A peer device ID is required.", nameof(peerDeviceId));
         return PeerTargetPrefix + peerDeviceId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string GetPendingTarget(Guid peerDeviceId)
+    {
+        if (peerDeviceId == Guid.Empty) throw new ArgumentException("A peer device ID is required.", nameof(peerDeviceId));
+        return PendingPeerTargetPrefix + peerDeviceId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

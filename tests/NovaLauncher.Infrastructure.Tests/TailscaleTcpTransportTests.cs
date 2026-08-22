@@ -31,12 +31,15 @@ public sealed class TailscaleTcpTransportTests
         await a.StartAsync(endpointA, CancellationToken.None);
         await b.StartAsync(endpointB, CancellationToken.None);
         var payload = Payload();
+        var progress = new List<SaveTransferProgress>();
+        a.ProgressChanged += progress.Add;
 
         var result = await a.PushAsync(payload, CancellationToken.None);
 
         Assert.True(result.Success, $"{result.Error}; server={b.LastServerError}");
         Assert.Equal(payload.Manifest.SnapshotId, endpointB.Received!.Manifest.SnapshotId);
         Assert.Equal("secret-save", System.Text.Encoding.UTF8.GetString(endpointB.Received.ChangedFiles["slot.sav"]));
+        Assert.Contains(progress, static item => item.Status == "Completed and verified" && item.BytesTransferred == item.TotalBytes);
     }
 
     [Fact]
@@ -61,6 +64,85 @@ public sealed class TailscaleTcpTransportTests
 
         Assert.False(result.Success);
         Assert.Null(endpoint.Received);
+    }
+
+    [Fact]
+    public async Task AuthenticatedDownloadResumesDurablePartialAndReportsCompletion()
+    {
+        var portA = FreePort(); var portB = FreePort(); while (portB == portA) portB = FreePort();
+        var secret = RandomNumberGenerator.GetBytes(32); var idA = Guid.NewGuid(); var idB = Guid.NewGuid();
+        var credentialA = new Secret(secret); var credentialB = new Secret(secret);
+        var settingsA = Settings(idA, "A", idB, portB, credentialA); var settingsB = Settings(idB, "B", idA, portA, credentialB);
+        var resumeRoot = Path.Combine(Path.GetTempPath(), $"NovaLauncher-Pull-{Guid.NewGuid():N}");
+        try
+        {
+            await using var a = new TailscaleTcpTransport(() => settingsA, credentialA, IPAddress.Loopback, portA, credentialA, resumeRoot);
+            await using var b = new TailscaleTcpTransport(() => settingsB, credentialB, IPAddress.Loopback, portB, credentialB);
+            var payload = Payload();
+            await a.StartAsync(new Endpoint(idB), CancellationToken.None);
+            await b.StartAsync(new Endpoint(idA) { Outgoing = payload }, CancellationToken.None);
+            var partial = Path.Combine(resumeRoot, idB.ToString("N"), payload.Manifest.SnapshotId.ToString("N"), "slot.sav");
+            Directory.CreateDirectory(Path.GetDirectoryName(partial)!);
+            await File.WriteAllBytesAsync(partial, payload.ChangedFiles["slot.sav"][..3]);
+            var progress = new List<SaveTransferProgress>();
+            a.ProgressChanged += progress.Add;
+
+            var result = await a.PullAsync(settingsA.EffectiveTrustedPeers[0], payload.Manifest.GameId, null, CancellationToken.None);
+
+            Assert.True(result.Success, result.Error);
+            Assert.Equal(payload.ChangedFiles["slot.sav"], result.Snapshot!.ChangedFiles["slot.sav"]);
+            Assert.Contains(progress, static item => item.Direction == "Download" && item.Status == "Completed and verified" && item.BytesTransferred == item.TotalBytes);
+        }
+        finally
+        {
+            if (Directory.Exists(resumeRoot)) Directory.Delete(resumeRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task TwoPhaseCredentialRotationKeepsEncryptedPeerUsable()
+    {
+        var portA = FreePort(); var portB = FreePort(); while (portB == portA) portB = FreePort();
+        var oldSecret = RandomNumberGenerator.GetBytes(32); var replacement = RandomNumberGenerator.GetBytes(32);
+        var idA = Guid.NewGuid(); var idB = Guid.NewGuid();
+        var credentialA = new Secret(oldSecret); var credentialB = new Secret(oldSecret);
+        var settingsA = Settings(idA, "A", idB, portB, credentialA); var settingsB = Settings(idB, "B", idA, portA, credentialB);
+        await using var a = new TailscaleTcpTransport(() => settingsA, credentialA, IPAddress.Loopback, portA, credentialA);
+        await using var b = new TailscaleTcpTransport(() => settingsB, credentialB, IPAddress.Loopback, portB, credentialB);
+        var endpointB = new Endpoint(idA) { RotationCredentials = credentialB };
+        await a.StartAsync(new Endpoint(idB), CancellationToken.None);
+        await b.StartAsync(endpointB, CancellationToken.None);
+        credentialA.SetPendingSecret(idB, replacement);
+
+        var error = await a.RotatePeerCredentialAsync(settingsA.EffectiveTrustedPeers[0], replacement, CancellationToken.None);
+        Assert.Null(error);
+        credentialA.PromotePendingSecret(idB);
+        var result = await a.PushAsync(Payload(), CancellationToken.None);
+
+        Assert.True(result.Success, $"{result.Error}; server={b.LastServerError}");
+        Assert.Equal(replacement, credentialA.GetSecret(idB));
+        Assert.Equal(replacement, credentialB.GetSecret(idA));
+    }
+
+    [Fact]
+    public async Task PendingCredentialRecoversAfterPeerCommittedBeforeClientAcknowledgement()
+    {
+        var portA = FreePort(); var portB = FreePort(); while (portB == portA) portB = FreePort();
+        var oldSecret = RandomNumberGenerator.GetBytes(32); var replacement = RandomNumberGenerator.GetBytes(32);
+        var idA = Guid.NewGuid(); var idB = Guid.NewGuid();
+        var credentialA = new Secret(oldSecret); var credentialB = new Secret(replacement);
+        credentialA.SetPendingSecret(idB, replacement);
+        var settingsA = Settings(idA, "A", idB, portB, credentialA); var settingsB = Settings(idB, "B", idA, portA, credentialB);
+        await using var a = new TailscaleTcpTransport(() => settingsA, credentialA, IPAddress.Loopback, portA, credentialA);
+        await using var b = new TailscaleTcpTransport(() => settingsB, credentialB, IPAddress.Loopback, portB, credentialB);
+        await a.StartAsync(new Endpoint(idB), CancellationToken.None);
+        await b.StartAsync(new Endpoint(idA), CancellationToken.None);
+
+        var result = await a.PushAsync(Payload(), CancellationToken.None);
+
+        Assert.True(result.Success, $"{result.Error}; server={b.LastServerError}");
+        Assert.Equal(replacement, credentialA.GetSecret(idB));
+        Assert.False(credentialA.ContainsPendingSecret(idB));
     }
 
     [Fact]
@@ -129,6 +211,7 @@ public sealed class TailscaleTcpTransportTests
     private static int FreePort() { var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop(); return port; }
     private sealed class Secret(byte[] value) : IPairingSecretStore, IPeerCredentialStore
     {
+        private readonly Dictionary<Guid, byte[]> _pending = [];
         public bool HasSecret => value.Length == 32;
         public byte[]? GetSecret() => value.ToArray();
         public void SetSecret(ReadOnlySpan<byte> secret) => value = secret.ToArray();
@@ -138,15 +221,58 @@ public sealed class TailscaleTcpTransportTests
         public void SetSecret(Guid peerDeviceId, ReadOnlySpan<byte> secret) => SetSecret(secret);
         public void Clear(Guid peerDeviceId) => Clear();
         public string GetCredentialReference(Guid peerDeviceId) => $"test/{peerDeviceId:N}";
+        public bool ContainsPendingSecret(Guid peerDeviceId) => _pending.ContainsKey(peerDeviceId);
+        public byte[]? GetPendingSecret(Guid peerDeviceId) => _pending.GetValueOrDefault(peerDeviceId)?.ToArray();
+        public void SetPendingSecret(Guid peerDeviceId, ReadOnlySpan<byte> secret) => _pending[peerDeviceId] = secret.ToArray();
+        public void PromotePendingSecret(Guid peerDeviceId) { value = _pending[peerDeviceId]; _pending.Remove(peerDeviceId); }
+        public void ClearPendingSecret(Guid peerDeviceId) => _pending.Remove(peerDeviceId);
     }
     private sealed class Endpoint(Guid expected) : ISaveSyncPeerEndpoint
     {
+        private SaveSnapshotManifest? _manifest;
+        private readonly Dictionary<string, List<byte>> _incoming = new(StringComparer.OrdinalIgnoreCase);
         public SaveSnapshotPayload? Received { get; private set; }
+        public SaveSnapshotPayload? Outgoing { get; init; }
+        public Secret? RotationCredentials { get; init; }
         public Func<string, Guid, PairingRedemptionResult>? Redeemer { get; init; }
         public Task<bool> AuthorizePeerAsync(Guid deviceId, CancellationToken token) => Task.FromResult(deviceId == expected);
         public Task<PairingRedemptionResult> RedeemInvitationAsync(string code, Guid deviceId, CancellationToken token) => Task.FromResult(Redeemer?.Invoke(code, deviceId) ?? new PairingRedemptionResult(false, null, null, "Not configured."));
         public Task<TransportResult> ReceivePushAsync(SaveSnapshotPayload snapshot, CancellationToken token) { Received = snapshot; return Task.FromResult(new TransportResult(true, false, null, null)); }
         public Task<TransportResult> ServePullAsync(GameId gameId, Guid? knownHead, CancellationToken token) => Task.FromResult(new TransportResult(true, false, null, null));
+        public Task<SavePushBeginResult> BeginIncomingSnapshotAsync(Guid requestingDeviceId, SaveSnapshotManifest manifest, IReadOnlyList<string> changedPaths, CancellationToken token)
+        {
+            _manifest = manifest;
+            foreach (var path in changedPaths) _incoming.TryAdd(path, []);
+            return Task.FromResult(new SavePushBeginResult(true, changedPaths.ToDictionary(path => path, path => (long)_incoming[path].Count, StringComparer.OrdinalIgnoreCase), null));
+        }
+        public Task<SavePushChunkResult> ReceiveIncomingSnapshotChunkAsync(Guid requestingDeviceId, Guid snapshotId, string relativePath, long offset, byte[] bytes, CancellationToken token)
+        {
+            var target = _incoming[relativePath];
+            if (target.Count != offset) return Task.FromResult(new SavePushChunkResult(false, target.Count, "Offset mismatch"));
+            target.AddRange(bytes);
+            return Task.FromResult(new SavePushChunkResult(true, target.Count, null));
+        }
+        public Task<TransportResult> CompleteIncomingSnapshotAsync(Guid requestingDeviceId, Guid snapshotId, CancellationToken token)
+        {
+            Received = new(_manifest!, _incoming.ToDictionary(static item => item.Key, static item => item.Value.ToArray(), StringComparer.OrdinalIgnoreCase));
+            return Task.FromResult(new TransportResult(true, false, null, null));
+        }
+        public Task<SavePullBeginResult> BeginOutgoingSnapshotAsync(Guid requestingDeviceId, GameId gameId, Guid? knownHead, CancellationToken token) =>
+            Task.FromResult(Outgoing is null || Outgoing.Manifest.SnapshotId == knownHead
+                ? new SavePullBeginResult(true, null, null)
+                : new SavePullBeginResult(true, Outgoing.Manifest, null));
+        public Task<SavePullChunkResult> ReadOutgoingSnapshotChunkAsync(Guid requestingDeviceId, Guid snapshotId, string relativePath, long offset, int maximumBytes, CancellationToken token)
+        {
+            if (Outgoing is null || Outgoing.Manifest.SnapshotId != snapshotId || !Outgoing.ChangedFiles.TryGetValue(relativePath, out var content))
+                return Task.FromResult(new SavePullChunkResult(false, null, false, "Missing"));
+            var count = Math.Min(maximumBytes, content.Length - (int)offset);
+            return Task.FromResult(new SavePullChunkResult(true, content.AsSpan((int)offset, count).ToArray(), offset + count == content.Length, null));
+        }
+        public Task<string?> PrepareCredentialRotationAsync(Guid requestingDeviceId, byte[] newSecret, CancellationToken token)
+        { RotationCredentials?.SetPendingSecret(requestingDeviceId, newSecret); return Task.FromResult<string?>(null); }
+        public Task<string?> CommitCredentialRotationAsync(Guid requestingDeviceId, CancellationToken token)
+        { RotationCredentials?.PromotePendingSecret(requestingDeviceId); return Task.FromResult<string?>(null); }
+        public Task<string?> CancelIncomingPartialTransfersAsync(Guid requestingDeviceId, CancellationToken token) => Task.FromResult<string?>(null);
     }
 
     private sealed class GameEndpoint(Guid expected, GameTransferManifest manifest, byte[] bytes) : IPeerGameTransferEndpoint

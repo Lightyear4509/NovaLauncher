@@ -1,6 +1,7 @@
 using NovaLauncher.Application.Persistence;
 using NovaLauncher.Application.Steam;
 using NovaLauncher.Domain.Library;
+using NovaLauncher.Domain.SaveSync;
 
 namespace NovaLauncher.Application.Library;
 
@@ -322,6 +323,30 @@ public sealed class LibraryCoordinator(
         finally { _mutationGate.Release(); }
     }
 
+    public async Task<LibraryMutationResult> SetSaveSyncPeersAsync(
+        GameId gameId,
+        IReadOnlyList<Guid>? peerDeviceIds,
+        CancellationToken cancellationToken)
+    {
+        var normalized = peerDeviceIds?.Distinct().Order().ToArray();
+        if (normalized is { Length: > SaveSyncSettings.MaximumTrustedPeers } || normalized?.Any(static id => id == Guid.Empty) == true)
+            return PersistenceFailure("The save-sync destination list is invalid.");
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var index = FindIndex(gameId);
+            if (index < 0) return PersistenceFailure("The selected game no longer exists.");
+            var existing = _games[index];
+            if (!string.Equals(existing.Source, "Manual", StringComparison.OrdinalIgnoreCase))
+                return PersistenceFailure("Save-sync destinations are available only for manually added games.");
+            return await SaveReplacementAsync(
+                index,
+                existing with { SaveSyncPeerIds = normalized is { Length: > 0 } ? normalized : null, UpdatedAtUtc = timeProvider.GetUtcNow() },
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally { _mutationGate.Release(); }
+    }
+
     public async Task<LibraryMutationResult> SetManualMetadataAsync(
         GameId gameId,
         string? description,
@@ -431,6 +456,42 @@ public sealed class LibraryCoordinator(
             gameId,
             existing with { RunAsAdministrator = enabled, UpdatedAtUtc = timeProvider.GetUtcNow() },
             cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<LibraryMutationResult> SaveLaunchActionAsync(
+        GameId gameId,
+        GameLaunchAction action,
+        CancellationToken cancellationToken)
+    {
+        var existing = _games.FirstOrDefault(game => game.Id == gameId);
+        if (existing is null) return PersistenceFailure("The selected game no longer exists.");
+        var label = action.Label.Trim();
+        if (action.Id == Guid.Empty || label.Length is < 1 or > 40 || label.Any(char.IsControl))
+            return PersistenceFailure("The launch action name must contain 1–40 safe characters.");
+        var validation = validator.Validate(new ManualGameDraft(
+            existing.Name,
+            existing.Platform,
+            action.Target.Target,
+            action.Target.Arguments,
+            action.Target.WorkingDirectory,
+            action.Target.Kind));
+        if (!validation.IsValid)
+            return new(LibraryMutationStatus.ValidationFailed, null, validation.Errors, "The launch action is invalid.");
+        var actions = (existing.LaunchActions ?? [])
+            .Where(candidate => candidate.Id != action.Id)
+            .Append(action with { Label = label })
+            .ToArray();
+        if (actions.Length > 12) return PersistenceFailure("A game can have at most 12 additional launch actions.");
+        return await MutateExistingAsync(gameId, existing with { LaunchActions = actions, UpdatedAtUtc = timeProvider.GetUtcNow() }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<LibraryMutationResult> RemoveLaunchActionAsync(GameId gameId, Guid actionId, CancellationToken cancellationToken)
+    {
+        var existing = _games.FirstOrDefault(game => game.Id == gameId);
+        if (existing is null) return PersistenceFailure("The selected game no longer exists.");
+        var actions = (existing.LaunchActions ?? []).Where(action => action.Id != actionId).ToArray();
+        if (actions.Length == (existing.LaunchActions?.Count ?? 0)) return PersistenceFailure("The launch action no longer exists.");
+        return await MutateExistingAsync(gameId, existing with { LaunchActions = actions, UpdatedAtUtc = timeProvider.GetUtcNow() }, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<LibraryMutationResult> AddPlayTimeAsync(
