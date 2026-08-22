@@ -1,11 +1,17 @@
 #define AppName "NovaLauncher"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #define AppPublisher "NovaLauncher Contributors"
 #ifndef ArtifactSuffix
   #define ArtifactSuffix ""
 #endif
 #ifndef UnsignedPreview
   #define UnsignedPreview 0
+#endif
+#ifndef ArtifactRoot
+  #define ArtifactRoot "..\artifacts\publish\win-x64"
+#endif
+#ifndef InstallerOutputDir
+  #define InstallerOutputDir "..\artifacts\release"
 #endif
 
 [Setup]
@@ -17,15 +23,15 @@ AppPublisher={#AppPublisher}
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription={#AppName} {#if UnsignedPreview}unsigned preview{#else}signed lifecycle candidate{#endif} installer
 VersionInfoProductName={#AppName}
-VersionInfoProductVersion=1.0.0.0
+VersionInfoProductVersion=1.1.0.0
 DefaultDirName={localappdata}\Programs\NovaLauncher
 DefaultGroupName=NovaLauncher
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-OutputDir=..\artifacts\release
-OutputBaseFilename=NovaLauncher-Setup-1.0.0{#ArtifactSuffix}-win-x64
+OutputDir={#InstallerOutputDir}
+OutputBaseFilename=NovaLauncher-Setup-1.1.0{#ArtifactSuffix}-win-x64
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern dynamic
@@ -40,7 +46,7 @@ SetupLogging=yes
 DisableProgramGroupPage=yes
 
 [Files]
-Source: "..\artifacts\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ArtifactRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 

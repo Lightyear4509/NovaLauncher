@@ -11,6 +11,7 @@ public sealed record PeerGameTransferOffer(TrustedSaveSyncPeer Peer, GameTransfe
 public sealed record GameTransferChunkResult(bool Success, byte[]? Bytes, bool EndOfFile, string? Error);
 public sealed record GameTransferResult(bool Success, bool Resumable, string Message, long CompletedBytes = 0, long TotalBytes = 0);
 public sealed record GameTransferProgress(string PackageName, string RelativePath, long CompletedBytes, long TotalBytes, double BytesPerSecond);
+public sealed record GameTransferScanProgress(string RelativePath, int CompletedFiles, int TotalFiles, long CompletedBytes, long TotalBytes);
 public sealed record GameTransferAuditItem(Guid OperationId, Guid OfferId, Guid PeerDeviceId, string PackageName, long TotalBytes, int FileCount, DateTimeOffset TimestampUtc, string Outcome);
 public sealed record ReceivedContentScanResult(bool ScannerAvailable, bool Clean, string Message);
 
@@ -34,6 +35,8 @@ public interface IPeerGameTransferEndpoint
 
 public interface IGameTransferService : IPeerGameTransferEndpoint
 {
+    event Action<GameTransferScanProgress>? ScanProgressChanged;
+
     Task<GameTransferPreview> PreviewAsync(LibraryItem game, string sourceFolder, CancellationToken cancellationToken);
     Task<GameTransferResult> AuthorizeAsync(LibraryItem game, GameTransferPreview preview, IReadOnlyCollection<Guid> recipientDeviceIds, bool userAttestedCopyRights, CancellationToken cancellationToken);
     Task<IReadOnlyList<PeerGameTransferOffer>> RefreshOffersAsync(CancellationToken cancellationToken);

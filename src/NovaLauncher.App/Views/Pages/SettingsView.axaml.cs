@@ -8,11 +8,67 @@ namespace NovaLauncher.App.Views.Pages;
 
 public sealed partial class SettingsView : NovaPage
 {
+    private static readonly FilePickerFileType ProfileBackupFileType = new("NovaLauncher profile backup") { Patterns = ["*.novaprofile.json"] };
+
     public SettingsView() => AvaloniaXamlLoader.Load(this);
 
     private async void OnApplyTheme(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ApplySelectedThemeAsync(LifetimeToken));
     private async void OnApplyMotionPreference(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ApplyMotionPreferenceAsync(LifetimeToken));
+    private async void OnApplyAccessibilityPreferences(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ApplyAccessibilityPreferencesAsync(LifetimeToken));
     private async void OnEnterControllerMode(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.SetControllerModeAsync(true, LifetimeToken));
+    private async void OnCreateLocalProfile(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.CreateLocalProfileAsync(LifetimeToken));
+    private async void OnSwitchLocalProfile(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.SwitchLocalProfileAsync(LifetimeToken));
+    private async void OnApplyStartupBehavior(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ApplyStartupBehaviorAsync(LifetimeToken));
+    private async void OnImportProfileBackupAsNew(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ImportProfileBackupAsNewAsync(LifetimeToken));
+    private async void OnRestoreProfileBackupOverActive(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RestoreProfileBackupOverActiveAsync(LifetimeToken));
+
+    private async void OnExportActiveProfile(object? sender, RoutedEventArgs e)
+    {
+        var file = await Storage.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export active local profile",
+            SuggestedFileName = "NovaLauncher-profile.novaprofile.json",
+            FileTypeChoices = [ProfileBackupFileType],
+            DefaultExtension = "json",
+            ShowOverwritePrompt = true,
+        });
+        var path = file?.TryGetLocalPath();
+        if (!string.IsNullOrWhiteSpace(path)) await ExecuteAsync(() => Workspace.ExportActiveProfileAsync(path, LifetimeToken));
+    }
+
+    private async void OnPreviewProfileBackup(object? sender, RoutedEventArgs e)
+    {
+        var files = await Storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Choose a NovaLauncher profile backup",
+            AllowMultiple = false,
+            FileTypeFilter = [ProfileBackupFileType],
+        });
+        var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path)) await ExecuteAsync(() => Workspace.PreviewProfileBackupAsync(path, LifetimeToken));
+    }
+    private async void OnRemoveDiscoveryLocation(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RemoveSelectedDiscoveryLocationAsync(LifetimeToken));
+    private async void OnRemoveIgnoredDiscoveryPath(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RemoveSelectedIgnoredDiscoveryPathAsync(LifetimeToken));
+    private async void OnScanSelectedDiscoveryLocation(object? sender, RoutedEventArgs e)
+    {
+        if (Workspace.SelectedDiscoveryLocation is null) return;
+        await ExecuteAsync(() => Workspace.ScanGameFolderAsync(Workspace.SelectedDiscoveryLocation, LifetimeToken));
+        Workspace.NavigateTo("Library");
+    }
+
+    private async void OnAddDiscoveryLocation(object? sender, RoutedEventArgs e)
+    {
+        var folders = await Storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose a reusable game discovery folder", AllowMultiple = false });
+        var path = folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path)) await ExecuteAsync(() => Workspace.AddDiscoveryLocationAsync(path, LifetimeToken));
+    }
+
+    private async void OnAddIgnoredDiscoveryPath(object? sender, RoutedEventArgs e)
+    {
+        var folders = await Storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose a game discovery folder to ignore", AllowMultiple = false });
+        var path = folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path)) await ExecuteAsync(() => Workspace.AddIgnoredDiscoveryPathAsync(path, LifetimeToken));
+    }
     private void OnApplySteamGridDbKey(object? sender, RoutedEventArgs e) => Workspace.ApplySteamGridDbApiKey();
     private async void OnSaveTailscalePeer(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ConfigureTailscalePeerAsync(LifetimeToken));
     private async void OnRetrySaveSyncListener(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RetrySaveSyncListenerAsync(LifetimeToken));

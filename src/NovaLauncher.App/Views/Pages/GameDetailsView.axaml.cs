@@ -21,11 +21,15 @@ public sealed partial class GameDetailsView : NovaPage
     private async void OnLaunch(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.LaunchSelectedAsync(LifetimeToken));
     private async void OnRemove(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RemoveSelectedAsync(LifetimeToken));
     private async void OnToggleFavorite(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ToggleFavoriteAsync(LifetimeToken));
+    private async void OnToggleSharedScreenVisibility(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ToggleSelectedSharedScreenVisibilityAsync(LifetimeToken));
     private async void OnRefreshMetadata(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RefreshSelectedMetadataAsync(LifetimeToken));
     private async void OnRefreshAchievements(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RefreshSelectedAchievementsAsync(LifetimeToken));
     private async void OnSearchGameIdentity(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.SearchSelectedGameIdentityAsync(LifetimeToken));
     private async void OnUnlinkGameIdentity(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.UnlinkSelectedGameIdentityAsync(LifetimeToken));
     private async void OnSaveManualMetadata(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.SaveManualMetadataAsync(LifetimeToken));
+    private async void OnSavePersonalWorkspace(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.SavePersonalWorkspaceAsync(LifetimeToken));
+    private async void OnAutosavePersonalWorkspace(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.SavePersonalWorkspaceAsync(LifetimeToken));
+    private async void OnClearScreenshotFolders(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.ClearSelectedScreenshotFoldersAsync(LifetimeToken));
     private async void OnRestoreProviderMetadata(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.RestoreProviderMetadataAsync(LifetimeToken));
     private async void OnPreviewArtworkVariants(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.PreviewArtworkVariantsAsync(LifetimeToken));
     private async void OnCropSelectedArtwork(object? sender, RoutedEventArgs e) => await ExecuteAsync(() => Workspace.CropSelectedArtworkAsync(LifetimeToken));
@@ -89,6 +93,13 @@ public sealed partial class GameDetailsView : NovaPage
         var folders = await Storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose this game's save folder", AllowMultiple = false });
         var path = folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
         if (!string.IsNullOrWhiteSpace(path)) await ExecuteAsync(() => Workspace.SetSelectedSaveDirectoryAsync(path, LifetimeToken));
+    }
+
+    private async void OnAddScreenshotFolder(object? sender, RoutedEventArgs e)
+    {
+        var folders = await Storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose a local screenshot folder", AllowMultiple = false });
+        var path = folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path)) await ExecuteAsync(() => Workspace.AddSelectedScreenshotFolderAsync(path, LifetimeToken));
     }
 
     private async void OnCopySaveSyncLink(object? sender, RoutedEventArgs e)

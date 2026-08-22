@@ -6,6 +6,9 @@ using NovaLauncher.Domain.Library;
 using System.ComponentModel;
 using Avalonia.Threading;
 using NovaLauncher.Application;
+using NovaLauncher.Application.Input;
+using Avalonia.VisualTree;
+using Avalonia.Controls.ApplicationLifetimes;
 
 namespace NovaLauncher.App;
 
@@ -13,12 +16,23 @@ namespace NovaLauncher.App;
 public sealed partial class MainWindow : Window
 {
     private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private readonly DispatcherTimer _controllerPollTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
+    private IControllerInputService? _controllerInput;
+    private ControllerButtons _previousControllerButtons;
+    private bool _controllerWasConnected;
+    private TrayIcon? _trayIcon;
+    private bool _forceClose;
 
     public MainWindow()
     {
         InitializeComponent();
         KeyDown += OnWindowKeyDown;
+        Closing += OnClosing;
+        _controllerPollTimer.Tick += OnControllerPoll;
     }
+
+    public void AttachControllerInput(IControllerInputService controllerInput) =>
+        _controllerInput = controllerInput ?? throw new ArgumentNullException(nameof(controllerInput));
 
     private MainWindowViewModel ViewModel => (MainWindowViewModel)DataContext!;
 
@@ -27,9 +41,14 @@ public sealed partial class MainWindow : Window
         ViewModel.Workspace!.PropertyChanged += OnWorkspacePropertyChanged;
         await ExecuteAsync(() => ViewModel.Workspace.InitializeAsync(_lifetimeCancellation.Token));
         UpdateControllerWindowState();
+        UpdateTrayBehavior();
+        if (ViewModel.Workspace.MinimizeToTray &&
+            Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime { Args: { } args } &&
+            args.Contains("--background", StringComparer.Ordinal))
+            Hide();
     }
 
-    private void OnClosed(object? sender, EventArgs e) { if (ViewModel.Workspace is not null) ViewModel.Workspace.PropertyChanged -= OnWorkspacePropertyChanged; _lifetimeCancellation.Cancel(); _lifetimeCancellation.Dispose(); }
+    private void OnClosed(object? sender, EventArgs e) { _controllerPollTimer.Stop(); _trayIcon?.Dispose(); if (ViewModel.Workspace is not null) ViewModel.Workspace.PropertyChanged -= OnWorkspacePropertyChanged; _lifetimeCancellation.Cancel(); _lifetimeCancellation.Dispose(); }
     private void OnShowHome(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateTo("Home");
     private void OnShowLibrary(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateTo("Library");
     private void OnShowSaves(object? sender, RoutedEventArgs e) => ViewModel.Workspace!.NavigateTo("Saves");
@@ -63,13 +82,105 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnWorkspacePropertyChanged(object? sender, PropertyChangedEventArgs e)
-    { if (e.PropertyName == nameof(ViewModel.Workspace.IsControllerMode)) UpdateControllerWindowState(); }
+    {
+        if (e.PropertyName == nameof(ViewModel.Workspace.IsControllerMode)) UpdateControllerWindowState();
+        else if (e.PropertyName == nameof(ViewModel.Workspace.MinimizeToTray)) UpdateTrayBehavior();
+    }
+
+    private void OnClosing(object? sender, WindowClosingEventArgs e)
+    {
+        if (_forceClose || ViewModel.Workspace?.MinimizeToTray != true) return;
+        e.Cancel = true;
+        Hide();
+    }
+
+    private void UpdateTrayBehavior()
+    {
+        if (ViewModel.Workspace?.MinimizeToTray == true)
+        {
+            if (_trayIcon is not null) return;
+            var open = new NativeMenuItem("Open NovaLauncher");
+            open.Click += (_, _) => { Show(); WindowState = WindowState.Normal; Activate(); };
+            var exit = new NativeMenuItem("Exit");
+            exit.Click += (_, _) =>
+            {
+                _forceClose = true;
+                if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();
+            };
+            var menu = new NativeMenu();
+            menu.Items.Add(open);
+            menu.Items.Add(exit);
+            _trayIcon = new TrayIcon { Icon = Icon, ToolTipText = "NovaLauncher", Menu = menu, IsVisible = true };
+            TrayIcon.SetIcons(Avalonia.Application.Current!, new TrayIcons { _trayIcon });
+        }
+        else if (_trayIcon is not null)
+        {
+            TrayIcon.SetIcons(Avalonia.Application.Current!, new TrayIcons());
+            _trayIcon.Dispose();
+            _trayIcon = null;
+        }
+    }
 
     private void UpdateControllerWindowState()
     {
         var enabled = ViewModel.Workspace?.IsControllerMode == true;
         WindowState = enabled ? WindowState.FullScreen : WindowState.Normal;
-        if (enabled) Dispatcher.UIThread.Post(() => this.FindControl<Button>("ExitControllerModeButton")?.Focus());
+        _previousControllerButtons = ControllerButtons.None;
+        if (enabled)
+        {
+            PollController();
+            _controllerPollTimer.Start();
+            Dispatcher.UIThread.Post(() => this.FindControl<Button>("ControllerHomeButton")?.Focus());
+        }
+        else
+        {
+            _controllerPollTimer.Stop();
+            _controllerWasConnected = false;
+        }
+    }
+
+    private void OnControllerPoll(object? sender, EventArgs e) => PollController();
+
+    private async void PollController()
+    {
+        if (ViewModel.Workspace?.IsControllerMode != true || _controllerInput is null) return;
+        if (!_controllerInput.TryGetState(out var state))
+        {
+            if (_controllerWasConnected || ViewModel.Workspace.ControllerConnectionStatus.StartsWith("Controller input", StringComparison.Ordinal))
+                ViewModel.Workspace.ReportControllerConnection(false, 0, _controllerInput.BackendName);
+            _controllerWasConnected = false;
+            _previousControllerButtons = ControllerButtons.None;
+            return;
+        }
+
+        if (!_controllerWasConnected)
+            ViewModel.Workspace.ReportControllerConnection(true, state.ControllerIndex, _controllerInput.BackendName);
+        _controllerWasConnected = true;
+        var pressed = state.Buttons & ~_previousControllerButtons;
+        _previousControllerButtons = state.Buttons;
+
+        if ((pressed & ControllerButtons.Back) != 0)
+        {
+            if (ViewModel.Workspace.CanNavigateBack) ViewModel.Workspace.NavigateBack();
+            else await ExecuteAsync(() => ViewModel.Workspace.ToggleControllerModeAsync(_lifetimeCancellation.Token));
+            return;
+        }
+        if ((pressed & ControllerButtons.Previous) != 0) ViewModel.Workspace.NavigateBack();
+        if ((pressed & ControllerButtons.Next) != 0) ViewModel.Workspace.NavigateForward();
+
+        var direction = (pressed & (ControllerButtons.Left | ControllerButtons.Up | ControllerButtons.Right | ControllerButtons.Down)) switch
+        {
+            var value when (value & (ControllerButtons.Left | ControllerButtons.Up)) != 0 => NavigationDirection.Previous,
+            var value when (value & (ControllerButtons.Right | ControllerButtons.Down)) != 0 => NavigationDirection.Next,
+            _ => (NavigationDirection?)null,
+        };
+        if (direction is { } navigation) FocusManager?.TryMoveFocus(navigation);
+        if ((pressed & ControllerButtons.Primary) != 0 && FocusManager?.GetFocusedElement() is Button button)
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        else if ((pressed & ControllerButtons.Primary) != 0 && FocusManager?.GetFocusedElement() is TextBox)
+            ViewModel.Workspace.ReportControllerTextEntryHandoff();
+        if ((pressed & ControllerButtons.Context) != 0 && FocusManager?.GetFocusedElement() is Control { ContextMenu: { } menu } control)
+            menu.Open(control);
     }
 
     private async Task ExecuteAsync(Func<Task> operation)

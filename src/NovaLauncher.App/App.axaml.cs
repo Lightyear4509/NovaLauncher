@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NovaLauncher.Application;
 using NovaLauncher.Application.Themes;
+using NovaLauncher.Application.Input;
 
 namespace NovaLauncher.App;
 
@@ -25,10 +26,12 @@ public sealed partial class App : Avalonia.Application
             // Do not synchronously wait for settings I/O on Avalonia's UI thread.
             // ThemeService marshals palette application back to this dispatcher.
             Program.Services.GetRequiredService<IThemeHost>().Apply("nova-dark");
-            desktop.MainWindow = new MainWindow
+            var mainWindow = new MainWindow
             {
                 DataContext = Program.Services.GetRequiredService<MainWindowViewModel>(),
             };
+            mainWindow.AttachControllerInput(Program.Services.GetRequiredService<IControllerInputService>());
+            desktop.MainWindow = mainWindow;
             Dispatcher.UIThread.Post(InitializeThemeAsync, DispatcherPriority.Loaded);
 
             if (desktop.Args?.Contains("--smoke-test", StringComparer.Ordinal) == true)

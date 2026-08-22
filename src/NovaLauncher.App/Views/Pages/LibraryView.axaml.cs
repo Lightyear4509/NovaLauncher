@@ -9,6 +9,8 @@ namespace NovaLauncher.App.Views.Pages;
 
 public sealed partial class LibraryView : NovaPage
 {
+    private static readonly FilePickerFileType LibraryTransferFileType = new("NovaLauncher library entries") { Patterns = ["*.novalibrary.json"] };
+
     public LibraryView() => AvaloniaXamlLoader.Load(this);
 
     private async void OnPickGameExecutable(object? sender, RoutedEventArgs e)
@@ -32,6 +34,10 @@ public sealed partial class LibraryView : NovaPage
         await ExecuteAsync(() => Workspace.FavoriteSelectedGamesAsync(LifetimeToken));
     private async void OnRefreshSelectedGames(object? sender, RoutedEventArgs e) =>
         await ExecuteAsync(() => Workspace.RefreshSelectedGamesMetadataAsync(LifetimeToken));
+    private async void OnApplyReviewedBulkEdits(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => Workspace.ApplyReviewedBulkEditsAsync(LifetimeToken));
+    private async void OnAddReviewedSelectionToCollection(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => Workspace.AddReviewedSelectionToCollectionAsync(LifetimeToken));
 
     private void OnToggleLibraryGameSelection(object? sender, RoutedEventArgs e)
     {
@@ -85,6 +91,35 @@ public sealed partial class LibraryView : NovaPage
 
     private async void OnImportDiscoveredGames(object? sender, RoutedEventArgs e) =>
         await ExecuteAsync(() => Workspace.ImportSelectedDiscoveredGamesAsync(LifetimeToken));
+
+    private async void OnExportSelectedLibraryEntries(object? sender, RoutedEventArgs e)
+    {
+        var file = await Storage.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export reviewed library entries",
+            SuggestedFileName = "NovaLauncher-library.novalibrary.json",
+            FileTypeChoices = [LibraryTransferFileType],
+            DefaultExtension = "json",
+            ShowOverwritePrompt = true,
+        });
+        var path = file?.TryGetLocalPath();
+        if (!string.IsNullOrWhiteSpace(path)) await ExecuteAsync(() => Workspace.ExportSelectedLibraryEntriesAsync(path, LifetimeToken));
+    }
+
+    private async void OnPreviewLibraryImport(object? sender, RoutedEventArgs e)
+    {
+        var files = await Storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Choose a NovaLauncher library-entry export",
+            AllowMultiple = false,
+            FileTypeFilter = [LibraryTransferFileType],
+        });
+        var path = files.Count > 0 ? files[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrWhiteSpace(path)) await ExecuteAsync(() => Workspace.PreviewLibraryImportAsync(path, LifetimeToken));
+    }
+
+    private async void OnCommitLibraryImport(object? sender, RoutedEventArgs e) =>
+        await ExecuteAsync(() => Workspace.CommitLibraryImportAsync(LifetimeToken));
 
     private void OnReviewDuplicate(object? sender, RoutedEventArgs e)
     {

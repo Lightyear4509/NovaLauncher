@@ -23,8 +23,8 @@ jobs:
       - name: Validate preview tag
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_NAME -ne 'v1.0.0-unsigned') {
-            throw "This source tree can only build v1.0.0-unsigned."
+          if ($env:GITHUB_REF_NAME -ne 'v1.1.0-unsigned') {
+            throw "This source tree can only build v1.1.0-unsigned."
           }
       - name: Restore locked dependencies
         run: dotnet restore NovaLauncher.sln --locked-mode
@@ -53,10 +53,10 @@ jobs:
           }
       - name: Build and verify explicitly unsigned artifacts
         shell: pwsh
-        run: .\eng\Build-UnsignedPreview.ps1 -DotNetPath (Get-Command dotnet).Source
+        run: .\scripts\Build-UnsignedPreview.ps1 -DotNetPath (Get-Command dotnet).Source
       - name: Upload unsigned preview candidates
         uses: actions/upload-artifact@v4
         with:
-          name: NovaLauncher-v1.0.0-unsigned
+          name: NovaLauncher-v1.1.0-unsigned
           path: artifacts/release/*
           if-no-files-found: error

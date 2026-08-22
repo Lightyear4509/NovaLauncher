@@ -88,7 +88,7 @@ public sealed class AtomicJsonDocumentStoreTests
     public async Task SaveRejectsWrongSchemaAndInvalidDomainWithoutWriting()
     {
         await using var fixture = PersistenceTestFixture.Create();
-        var wrongSchema = PersistenceTestFixture.Games("Wrong") with { SchemaVersion = 2 };
+        var wrongSchema = PersistenceTestFixture.Games("Wrong") with { SchemaVersion = GamesDocument.CurrentSchemaVersion + 1 };
         var invalidDomain = PersistenceTestFixture.Games("Invalid") with { Games = [] };
         invalidDomain = invalidDomain with { Games = [PersistenceTestFixture.Games("Invalid").Games[0] with { Name = "" }] };
 
@@ -115,6 +115,30 @@ public sealed class AtomicJsonDocumentStoreTests
         Assert.Equal(DocumentLoadStatus.MigratedLegacy, load.Status);
         Assert.Equal("Legacy", Assert.Single(Assert.IsType<GamesDocument>(load.Document).Games).Name);
         Assert.Contains("legacy", load.Warning, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task VersionOneGamesMigrateInMemoryThenCommitAtomicallyWithBackup()
+    {
+        await using var fixture = PersistenceTestFixture.Create();
+        await fixture.GamesStore.SaveAsync(PersistenceTestFixture.Games("Before 1.1"), CancellationToken.None);
+        var path = Path.Combine(fixture.Root, "games.json");
+        var currentJson = await File.ReadAllTextAsync(path, CancellationToken.None);
+        var versionOneJson = currentJson.Replace(
+            $"\"schemaVersion\": {GamesDocument.CurrentSchemaVersion}",
+            "\"schemaVersion\": 1",
+            StringComparison.Ordinal);
+        await File.WriteAllTextAsync(path, versionOneJson, CancellationToken.None);
+
+        var migrated = await fixture.GamesStore.LoadAsync(CancellationToken.None);
+
+        Assert.Equal(DocumentLoadStatus.MigratedLegacy, migrated.Status);
+        Assert.Equal(GamesDocument.CurrentSchemaVersion, migrated.Document!.SchemaVersion);
+        Assert.Equal(DocumentSaveStatus.Saved, (await fixture.GamesStore.SaveAsync(migrated.Document, CancellationToken.None)).Status);
+        using var committed = JsonDocument.Parse(await File.ReadAllBytesAsync(path, CancellationToken.None));
+        Assert.Equal(GamesDocument.CurrentSchemaVersion, committed.RootElement.GetProperty("schemaVersion").GetInt32());
+        var backup = await File.ReadAllTextAsync(path + ".bak", CancellationToken.None);
+        Assert.Contains("\"schemaVersion\": 1", backup, StringComparison.Ordinal);
     }
 
     [Fact]

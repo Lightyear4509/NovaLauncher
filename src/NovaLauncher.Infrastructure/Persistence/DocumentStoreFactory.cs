@@ -13,7 +13,8 @@ public static class DocumentStoreFactory
             fileSystem,
             new GamesDocumentPolicy(),
             PersistenceJsonContext.Default.GamesDocument,
-            timeProvider);
+            timeProvider,
+            new GamesDocumentMigrator());
 
     public static IDocumentStore<CollectionsDocument> CreateCollectionsStore(
         string dataRoot,
@@ -58,5 +59,16 @@ public static class DocumentStoreFactory
             fileSystem,
             new SaveSyncDocumentPolicy(),
             PersistenceJsonContext.Default.SaveSyncDocument,
+            timeProvider);
+
+    public static IDocumentStore<ProfilesDocument> CreateProfilesStore(
+        string dataRoot,
+        IAtomicFileSystem fileSystem,
+        TimeProvider timeProvider) =>
+        new AtomicJsonDocumentStore<ProfilesDocument>(
+            dataRoot,
+            fileSystem,
+            new ProfilesDocumentPolicy(),
+            PersistenceJsonContext.Default.ProfilesDocument,
             timeProvider);
 }

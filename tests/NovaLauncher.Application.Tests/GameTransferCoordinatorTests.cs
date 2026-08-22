@@ -42,6 +42,26 @@ public sealed class GameTransferCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task AuthorizationRevalidatesContentEvenWhenSizeAndTimestampAreUnchanged()
+    {
+        var source = await CreateSourceAsync();
+        var game = Game("Manual", Path.Combine(source, "game.exe"));
+        using var service = CreateService(out _, out var saveSync);
+        var preview = await service.PreviewAsync(game, source, CancellationToken.None);
+        var dataFile = Assert.Single(preview.Files, static file => file.RelativePath == "data.bin");
+        var path = Path.Combine(source, dataFile.RelativePath);
+        var replacement = Enumerable.Repeat((byte)0x5A, checked((int)dataFile.Length)).ToArray();
+        await File.WriteAllBytesAsync(path, replacement);
+        File.SetLastWriteTimeUtc(path, dataFile.LastWriteTimeUtc.UtcDateTime);
+
+        var result = await service.AuthorizeAsync(game, preview, [saveSync.Peer.DeviceId], true, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("source changed", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await service.ListAuthorizedGameTransfersAsync(saveSync.Peer.DeviceId, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task PreviewIncludesExecutableAndEveryRegularFileInSubfolders()
     {
         var source = await CreateSourceAsync();
@@ -57,6 +77,25 @@ public sealed class GameTransferCoordinatorTests : IDisposable
         Assert.Contains(preview.Files, file => file.RelativePath == "game.exe");
         Assert.Contains(preview.Files, file => file.RelativePath == "data.bin");
         Assert.Contains(preview.Files, file => file.RelativePath == "content/levels/level-01.dat");
+    }
+
+    [Fact]
+    public async Task PreviewReportsMonotonicHashProgressForLargeFolderFeedback()
+    {
+        var source = await CreateSourceAsync();
+        var progress = new List<GameTransferScanProgress>();
+        using var service = CreateService(out _, out _);
+        service.ScanProgressChanged += progress.Add;
+
+        var preview = await service.PreviewAsync(Game("Manual", Path.Combine(source, "game.exe")), source, CancellationToken.None);
+
+        Assert.True(preview.Accepted, preview.Error);
+        Assert.NotEmpty(progress);
+        Assert.Equal(preview.Files.Count, progress[^1].CompletedFiles);
+        Assert.Equal(preview.Files.Count, progress[^1].TotalFiles);
+        Assert.Equal(preview.TotalBytes, progress[^1].CompletedBytes);
+        Assert.Equal(preview.TotalBytes, progress[^1].TotalBytes);
+        Assert.True(progress.Zip(progress.Skip(1)).All(pair => pair.First.CompletedBytes <= pair.Second.CompletedBytes));
     }
 
     [Theory]

@@ -23,6 +23,9 @@ using NovaLauncher.Infrastructure.GameTransfer;
 using NovaLauncher.Infrastructure.SaveSync;
 using NovaLauncher.Application.Lifecycle;
 using NovaLauncher.Infrastructure.Lifecycle;
+using NovaLauncher.Application.Input;
+using NovaLauncher.Infrastructure.Input;
+using NovaLauncher.Application.Profiles;
 using System.Reflection;
 
 namespace NovaLauncher.App;
@@ -120,12 +123,16 @@ internal static class Program
 
         var services = new ServiceCollection();
         services.AddSingleton<MainWindowViewModel>();
+        services.AddSingleton<IControllerInputService, WindowsXInputControllerInput>();
         services.AddSingleton<IThemeHost, AvaloniaThemeHost>();
         services.AddSingleton<IThemeService, ThemeService>();
         services.AddSingleton<ManualGameDraftValidator>();
         services.AddSingleton<LibraryCoordinator>();
         services.AddSingleton<CollectionCoordinator>();
+        services.AddSingleton<ProfileCoordinator>();
+        services.AddSingleton<ProfilePortabilityCoordinator>();
         services.AddSingleton<LibraryWorkspaceViewModel>();
+        services.AddSingleton<LibraryPortabilityCoordinator>();
         services.AddSingleton<IGameEnrichmentService, GameEnrichmentService>();
         services.AddSingleton<IGameIdentityService, GameIdentityService>();
         services.AddSingleton<IApiKeySession>(_ => new ApiKeySession(
@@ -195,6 +202,8 @@ internal static class Program
             provider.GetRequiredService<TimeProvider>(),
             dataRoot,
             peerCredentials: provider.GetRequiredService<IPeerCredentialStore>()));
+        services.AddSingleton<IPrivateSnapshotDestinationService>(provider =>
+            new PrivateSnapshotDestinationService(dataRoot, provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<GameTransferCoordinator>(provider => new GameTransferCoordinator(
             provider.GetRequiredService<IPeerGameTransferTransport>(),
             provider.GetRequiredService<ISaveSyncService>(),
@@ -226,6 +235,10 @@ internal static class Program
             Path.Combine(dataRoot, "Updates", "Staging"),
             trustedPublisherPins));
         services.AddSingleton<IDiagnosticExportService>(_ => new SanitizedDiagnosticExportService(dataRoot, TimeProvider.System));
+        services.AddSingleton<ICurrentUserRunKey, WindowsCurrentUserRunKey>();
+        services.AddSingleton<IStartupIntegration>(provider => new WindowsStartupIntegration(
+            provider.GetRequiredService<ICurrentUserRunKey>(),
+            Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "NovaLauncher.App.exe")));
         var crashRecovery = new CrashRecoveryService(dataRoot, TimeProvider.System);
         var recoveryState = crashRecovery.BeginSession();
         services.AddSingleton<ICrashRecoveryService>(crashRecovery);
@@ -254,6 +267,11 @@ internal static class Program
                 provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<IDocumentStore<SaveSyncDocument>>(provider =>
             DocumentStoreFactory.CreateSaveSyncStore(
+                dataRoot,
+                provider.GetRequiredService<IAtomicFileSystem>(),
+                provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<IDocumentStore<ProfilesDocument>>(provider =>
+            DocumentStoreFactory.CreateProfilesStore(
                 dataRoot,
                 provider.GetRequiredService<IAtomicFileSystem>(),
                 provider.GetRequiredService<TimeProvider>()));

@@ -8,6 +8,6 @@ public sealed class ProductIdentityTests
     public void IdentityIsStableAndVersioned()
     {
         Assert.Equal("NovaLauncher", ProductIdentity.Name);
-        Assert.Equal("1.0.0", ProductIdentity.Version);
+        Assert.Equal("1.1.0", ProductIdentity.Version);
     }
 }

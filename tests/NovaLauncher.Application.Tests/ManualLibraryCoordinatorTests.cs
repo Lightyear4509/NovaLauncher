@@ -120,6 +120,60 @@ public sealed class ManualLibraryCoordinatorTests
         Assert.Empty(removed.Item!.LaunchActions!);
     }
 
+    [Fact]
+    public async Task NotesAndTagsAreNormalizedAndPersistedAtomically()
+    {
+        var store = new RecordingStore(DocumentSaveStatus.Saved);
+        using var coordinator = CreateCoordinator(store);
+        var game = (await coordinator.AddManualGameAsync(ValidDraft(), CancellationToken.None)).Item!;
+
+        var result = await coordinator.SetNotesAndTagsAsync(
+            game.Id,
+            "  Remember the controller layout.  ",
+            [" Co-op ", "favorite", "co-OP", ""],
+            CancellationToken.None);
+
+        Assert.Equal(LibraryMutationStatus.Saved, result.Status);
+        Assert.Equal("Remember the controller layout.", result.Item!.Notes);
+        Assert.Equal(["Co-op", "favorite"], result.Item.Tags);
+        Assert.Equal(result.Item, Assert.Single(store.LastSaved!.Games));
+    }
+
+    [Fact]
+    public async Task InvalidNotesAndTagsLeaveLibraryUnchanged()
+    {
+        var store = new RecordingStore(DocumentSaveStatus.Saved);
+        using var coordinator = CreateCoordinator(store);
+        var game = (await coordinator.AddManualGameAsync(ValidDraft(), CancellationToken.None)).Item!;
+
+        var result = await coordinator.SetNotesAndTagsAsync(
+            game.Id,
+            new string('n', 50_001),
+            ["valid"],
+            CancellationToken.None);
+
+        Assert.Equal(LibraryMutationStatus.PersistenceFailed, result.Status);
+        Assert.Null(Assert.Single(coordinator.Games).Notes);
+    }
+
+    [Fact]
+    public async Task ScreenshotFoldersAreLocalNormalizedAndPersisted()
+    {
+        var store = new RecordingStore(DocumentSaveStatus.Saved);
+        using var coordinator = CreateCoordinator(store);
+        var game = (await coordinator.AddManualGameAsync(ValidDraft(), CancellationToken.None)).Item!;
+
+        var result = await coordinator.SetScreenshotFoldersAsync(
+            game.Id,
+            [Path.GetTempPath(), Path.GetTempPath()],
+            CancellationToken.None);
+
+        Assert.Equal(LibraryMutationStatus.Saved, result.Status);
+        Assert.Single(result.Item!.ScreenshotFolders!);
+        var rejected = await coordinator.SetScreenshotFoldersAsync(game.Id, ["\\\\server\\screens"], CancellationToken.None);
+        Assert.Equal(LibraryMutationStatus.PersistenceFailed, rejected.Status);
+    }
+
     private static LibraryCoordinator CreateCoordinator(IDocumentStore<GamesDocument> store) =>
         new(store, new ManualGameDraftValidator(), new FixedTimeProvider());
 

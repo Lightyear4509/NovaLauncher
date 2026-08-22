@@ -10,6 +10,7 @@
 **/obj/
 TestResults/
 artifacts/
+RELEASE-NOTES-*.md
 *.user
 *.suo
 *.log

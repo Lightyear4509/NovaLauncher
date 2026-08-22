@@ -67,7 +67,34 @@ public sealed class LibraryWorkflowTests
         Assert.True(saved.RunAsAdministrator);
         Assert.Equal(TimeSpan.FromMinutes(42), saved.TotalPlayTime);
         Assert.Equal(launchedAt, saved.LastPlayedAtUtc);
+        var session = Assert.Single(saved.LaunchSessions!);
+        Assert.Equal(launchedAt, session.StartedAtUtc);
+        Assert.Equal(launchedAt.AddMinutes(42), session.EndedAtUtc);
+        Assert.Equal(TimeSpan.FromMinutes(42), session.Duration);
         Assert.Equal(saved, Assert.Single(Assert.IsType<GamesDocument>(store.LastSaved).Games));
+    }
+
+    [Fact]
+    public async Task ReviewedBulkEditsPersistTagsAndMetadataAtomically()
+    {
+        var store = new MemoryGamesStore();
+        using var coordinator = new LibraryCoordinator(store, new ManualGameDraftValidator(), TimeProvider.System);
+        var first = (await coordinator.AddManualGameAsync(Draft("First"), CancellationToken.None)).Item!;
+        var second = (await coordinator.AddManualGameAsync(Draft("Second"), CancellationToken.None)).Item!;
+
+        var result = await coordinator.BulkEditAsync(
+            [first.Id, second.Id],
+            new BulkLibraryEditDraft(["Co-op", "co-OP"], "Linux", "Bring a controller."),
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.All(coordinator.Games, game =>
+        {
+            Assert.Equal("Linux", game.Platform);
+            Assert.Equal("Co-op", Assert.Single(game.Tags!));
+            Assert.Equal("Bring a controller.", game.Metadata.Description!.Value);
+            Assert.True(game.Metadata.Description.Provenance.IsManual);
+        });
     }
 
     [Fact]
@@ -82,6 +109,11 @@ public sealed class LibraryWorkflowTests
             DocumentSaveStatus.Saved,
             (await coordinator.SetMembershipAsync(collection.Id, gameId, true, CancellationToken.None)).Status);
         Assert.Equal(gameId, Assert.Single(Assert.Single(coordinator.Collections).GameIds));
+        var secondGameId = GameId.New();
+        Assert.Equal(
+            DocumentSaveStatus.Saved,
+            (await coordinator.SetMembershipsAsync(collection.Id, [gameId, secondGameId], true, CancellationToken.None)).Status);
+        Assert.Equal(2, Assert.Single(coordinator.Collections).GameIds.Count);
         Assert.Equal(
             DocumentSaveStatus.Saved,
             (await coordinator.RenameAsync(collection.Id, "Favorites", CancellationToken.None)).Status);

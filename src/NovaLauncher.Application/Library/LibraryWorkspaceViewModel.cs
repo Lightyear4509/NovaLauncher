@@ -13,6 +13,9 @@ using NovaLauncher.Application.SaveSync;
 using NovaLauncher.Domain.SaveSync;
 using NovaLauncher.Application.GameTransfer;
 using NovaLauncher.Application.Lifecycle;
+using NovaLauncher.Application.Profiles;
+using NovaLauncher.Domain.Profiles;
+using NovaLauncher.Application.Localization;
 
 namespace NovaLauncher.Application.Library;
 
@@ -26,6 +29,20 @@ public sealed record HomeSectionOption(string Id, string DisplayName, bool IsVis
 public sealed record HomeSectionViewModel(string Id, string DisplayName, IReadOnlyList<LibraryItem> Games);
 
 public sealed record LocalActivityItem(DateTimeOffset CreatedAt, string Message);
+
+public sealed record ScreenshotGalleryItem(string Path, string Name, DateTimeOffset ModifiedAtUtc);
+
+public sealed class ReviewedLibraryImportItem(LibraryImportPreviewItem preview)
+{
+    public LibraryImportPreviewItem Preview { get; } = preview;
+    public bool IsSelected { get; set; } = preview.CanImport;
+}
+
+public sealed class ReviewedProfileBackupItem(ProfileBackupPreviewItem preview)
+{
+    public ProfileBackupPreviewItem Preview { get; } = preview;
+    public bool IsSelected { get; set; } = preview.IsValid;
+}
 
 public sealed record DuplicateReviewItem(LibraryItem Primary, LibraryItem Candidate, string Reason);
 
@@ -54,7 +71,12 @@ public sealed class LibraryWorkspaceViewModel(
     IUpdateService? updates = null,
     IDiagnosticExportService? diagnostics = null,
     CrashRecoveryState? crashRecovery = null,
-    IUpdateRecoveryService? updateRecovery = null) : INotifyPropertyChanged
+    IUpdateRecoveryService? updateRecovery = null,
+    LibraryPortabilityCoordinator? portability = null,
+    ProfileCoordinator? profiles = null,
+    IStartupIntegration? startupIntegration = null,
+    ProfilePortabilityCoordinator? profilePortability = null,
+    IPrivateSnapshotDestinationService? privateDestinations = null) : INotifyPropertyChanged
 {
     private LibraryItem? _selectedGame;
     private GameCollection? _selectedCollection;
@@ -69,6 +91,7 @@ public sealed class LibraryWorkspaceViewModel(
     private string _steamRoot = string.Empty;
     private string _status = "Loading library…";
     private bool _favoritesOnly;
+    private bool _sharedScreenMode;
     private bool _isBusy;
     private bool _confirmRemoval;
     private bool _confirmRestore;
@@ -87,7 +110,13 @@ public sealed class LibraryWorkspaceViewModel(
     private string _currentPage = "Home";
     private string _selectedThemeId = themes.CurrentThemeId;
     private bool _reduceMotion = themes.ReduceMotion;
+    private double _textScale = themes.Accessibility.TextScale;
+    private double _focusScale = themes.Accessibility.FocusScale;
+    private string _contrastPreset = themes.Accessibility.ContrastPreset;
+    private bool _showControllerHints = themes.Accessibility.ShowControllerHints;
+    private string _culture = themes.Accessibility.Culture;
     private bool _isControllerMode = themes.ControllerMode;
+    private string _controllerConnectionStatus = "Controller input has not been checked.";
     private string _steamGridDbApiKey = string.Empty;
     private string _tailscalePeerAddress = themes.TailscalePeerAddress ?? string.Empty;
     private string _pairingCode = string.Empty;
@@ -99,6 +128,9 @@ public sealed class LibraryWorkspaceViewModel(
     private bool _isNavigationCompact;
     private readonly Stack<string> _backHistory = new();
     private readonly Stack<string> _forwardHistory = new();
+    private string? _pageBeforeController;
+    private string[] _backHistoryBeforeController = [];
+    private string[] _forwardHistoryBeforeController = [];
     private string _saveSyncPairingFeedback = "Enter and save the other device's Tailscale IP before pairing.";
     private string _identitySearchText = string.Empty;
     private string _manualDescription = string.Empty;
@@ -106,6 +138,18 @@ public sealed class LibraryWorkspaceViewModel(
     private string _manualDevelopers = string.Empty;
     private string _manualPublishers = string.Empty;
     private string _manualReleaseDate = string.Empty;
+    private string _personalNotes = string.Empty;
+    private string _personalTags = string.Empty;
+    private string _privateDestinationPath = privateDestinations?.Configuration?.RootPath ?? string.Empty;
+    private long _privateDestinationBudgetMiB = (privateDestinations?.Configuration?.StorageBudgetBytes ?? 10L * 1024 * 1024 * 1024) / (1024 * 1024);
+    private int _privateDestinationRetention = privateDestinations?.Configuration?.RetainedSnapshotsPerGame ?? 10;
+    private bool _syncPrivateMetadata = privateDestinations?.Configuration?.SyncNotesAndTags ?? false;
+    private readonly IReadOnlyList<string> _cultureOptions = InterfaceLocalizer.ReviewedCultures;
+    private LibraryItem? _privateDestinationGame;
+    private DestinationPublishPreview? _destinationPublishPreview;
+    private DestinationRepairPreview? _destinationRepairPreview;
+    private SaveSnapshotHistoryItem? _privateDestinationSnapshot;
+    private PrivateMetadataPreview? _privateMetadataPreview;
     private string _selectedArtworkKind = "Cover";
     private double _artworkCropX;
     private double _artworkCropY;
@@ -129,6 +173,7 @@ public sealed class LibraryWorkspaceViewModel(
     private string _gameTransferStatus = "No peer game transfer is active.";
     private double _gameTransferProgress;
     private bool _isGameTransferActive;
+    private bool _isGameTransferAuthorizing;
     private CancellationTokenSource? _gameTransferCancellation;
     private string _selectedUpdateChannel = themes.UpdateChannel;
     private UpdateRelease? _availableUpdate;
@@ -144,6 +189,7 @@ public sealed class LibraryWorkspaceViewModel(
     private string _saveTransferEta = "—";
     private SynchronizationContext? _uiContext;
     private bool _saveTransferProgressSubscribed;
+    private bool _gameTransferScanProgressSubscribed;
     private CancellationTokenSource? _saveTransferCancellation;
     private bool _confirmCancelSavePartials;
     private HomeSectionOption? _selectedHomeSection;
@@ -155,6 +201,19 @@ public sealed class LibraryWorkspaceViewModel(
     private string _launchActionTarget = string.Empty;
     private string _launchActionArguments = string.Empty;
     private string _launchActionWorkingDirectory = string.Empty;
+    private LibraryImportPreview? _libraryImportPreview;
+    private LibraryPortabilityCoordinator? _portability = portability;
+    private string _bulkTags = string.Empty;
+    private string _bulkPlatform = string.Empty;
+    private string _bulkDescription = string.Empty;
+    private LocalProfile? _selectedProfile;
+    private string _profileName = string.Empty;
+    private string? _selectedDiscoveryLocation;
+    private string? _selectedIgnoredDiscoveryPath;
+    private bool _startWithWindows = themes.StartWithWindows;
+    private bool _minimizeToTray = themes.MinimizeToTray;
+    private ProfileBackupPreview? _profileBackupPreview;
+    private string _importedProfileName = string.Empty;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -177,6 +236,13 @@ public sealed class LibraryWorkspaceViewModel(
     public ObservableCollection<DuplicateReviewItem> DuplicateCandidates { get; } = [];
     public ObservableCollection<GameIdentityCandidate> IdentityCandidates { get; } = [];
     public ObservableCollection<string> IdentitySearchFailures { get; } = [];
+    public ObservableCollection<ScreenshotGalleryItem> ScreenshotGallery { get; } = [];
+    public ObservableCollection<ReviewedLibraryImportItem> LibraryImportItems { get; } = [];
+    public ObservableCollection<LocalProfile> LocalProfiles { get; } = [];
+    public ObservableCollection<string> DiscoveryLocations { get; } = [];
+    public ObservableCollection<string> IgnoredDiscoveryPaths { get; } = [];
+    public ObservableCollection<ReviewedProfileBackupItem> ProfileBackupItems { get; } = [];
+    public ObservableCollection<string> ProfileBackupScopeNotes { get; } = [];
     public ObservableCollection<ArtworkCandidate> ArtworkVariants { get; } = [];
     public ObservableCollection<SaveSnapshotHistoryItem> SaveSnapshotHistory { get; } = [];
     public ObservableCollection<SaveRestoreHistoryItem> SaveRestoreHistory { get; } = [];
@@ -247,7 +313,18 @@ public sealed class LibraryWorkspaceViewModel(
         }
     }
     public bool HasGameTransferPreview => GameTransferPreview?.Accepted == true;
-    public bool CanAuthorizeGameTransfer => HasGameTransferPreview && GameTransferRightsAttested && SelectedTrustedPeer?.State == TrustedPeerState.Active;
+    public bool CanAuthorizeGameTransfer => !IsGameTransferAuthorizing && HasGameTransferPreview && GameTransferRightsAttested && SelectedTrustedPeer?.State == TrustedPeerState.Active;
+    public bool IsGameTransferAuthorizing
+    {
+        get => _isGameTransferAuthorizing;
+        private set
+        {
+            if (!Set(ref _isGameTransferAuthorizing, value)) return;
+            OnPropertyChanged(nameof(CanAuthorizeGameTransfer));
+            OnPropertyChanged(nameof(AuthorizeGameTransferButtonText));
+        }
+    }
+    public string AuthorizeGameTransferButtonText => IsGameTransferAuthorizing ? "Revalidating folder…" : "Authorize 24-hour offer";
     public string GameTransferAuthorizationHint => GameTransferPreview is null
         ? "Choose a folder to scan every regular file in it and its subfolders."
         : !GameTransferPreview.Accepted
@@ -314,7 +391,9 @@ public sealed class LibraryWorkspaceViewModel(
 
     public IReadOnlyList<string> LibraryCardSizeOptions { get; } = ["Small", "Medium", "Large"];
 
-    public IReadOnlyList<string> SmartCollectionOptions { get; } = ["All games", "Favorites", "Recently played", "Manual games", "Steam games", "Missing targets"];
+    public ObservableCollection<string> SmartCollectionOptions { get; } = ["All games", "Favorites", "Recently played", "Manual games", "Steam games", "Missing targets"];
+    public ObservableCollection<DestinationHealthEvent> PrivateDestinationHealth { get; } = [];
+    public ObservableCollection<SaveSnapshotHistoryItem> PrivateDestinationSnapshots { get; } = [];
     public IReadOnlyList<string> ArtworkKindOptions { get; } = ["Cover", "Hero", "Logo", "Background"];
 
     public IReadOnlyList<ThemeOption> ThemeOptions => themes.Themes;
@@ -322,6 +401,37 @@ public sealed class LibraryWorkspaceViewModel(
     public string SelectedThemeId { get => _selectedThemeId; set => Set(ref _selectedThemeId, value); }
 
     public bool ReduceMotion { get => _reduceMotion; set => Set(ref _reduceMotion, value); }
+    public string PrivateDestinationPath { get => _privateDestinationPath; set => Set(ref _privateDestinationPath, value); }
+    public long PrivateDestinationBudgetMiB { get => _privateDestinationBudgetMiB; set => Set(ref _privateDestinationBudgetMiB, value); }
+    public int PrivateDestinationRetention { get => _privateDestinationRetention; set => Set(ref _privateDestinationRetention, value); }
+    public bool SyncPrivateMetadata { get => _syncPrivateMetadata; set => Set(ref _syncPrivateMetadata, value); }
+    public LibraryItem? PrivateDestinationGame { get => _privateDestinationGame; set => Set(ref _privateDestinationGame, value); }
+    public SaveSnapshotHistoryItem? PrivateDestinationSnapshot { get => _privateDestinationSnapshot; set => Set(ref _privateDestinationSnapshot, value); }
+    public DestinationPublishPreview? DestinationPublishPreview { get => _destinationPublishPreview; private set { if (Set(ref _destinationPublishPreview, value)) OnPropertyChanged(nameof(HasDestinationPublishPreview)); } }
+    public DestinationRepairPreview? DestinationRepairPreview { get => _destinationRepairPreview; private set { if (Set(ref _destinationRepairPreview, value)) OnPropertyChanged(nameof(HasDestinationRepairPreview)); } }
+    public bool HasDestinationPublishPreview => DestinationPublishPreview is not null;
+    public bool HasDestinationRepairPreview => DestinationRepairPreview is not null;
+    public PrivateMetadataPreview? PrivateMetadataPreview { get => _privateMetadataPreview; private set { if (Set(ref _privateMetadataPreview, value)) OnPropertyChanged(nameof(HasPrivateMetadataPreview)); } }
+    public bool HasPrivateMetadataPreview => PrivateMetadataPreview is not null;
+    public double TextScale { get => _textScale; set => Set(ref _textScale, value); }
+    public double FocusScale { get => _focusScale; set => Set(ref _focusScale, value); }
+    public string ContrastPreset { get => _contrastPreset; set => Set(ref _contrastPreset, value); }
+    public bool ShowControllerHints { get => _showControllerHints; set => Set(ref _showControllerHints, value); }
+    public string Culture
+    {
+        get => _culture;
+        set
+        {
+            if (!Set(ref _culture, value)) return;
+            OnPropertyChanged(nameof(HomeNavigationLabel));
+            OnPropertyChanged(nameof(LibraryNavigationLabel));
+            OnPropertyChanged(nameof(SavesNavigationLabel));
+            OnPropertyChanged(nameof(SettingsNavigationLabel));
+        }
+    }
+    public IReadOnlyList<string> TextScaleOptions { get; } = ["100%", "125%", "150%", "175%", "200%"];
+    public IReadOnlyList<string> ContrastPresetOptions { get; } = ["Standard", "High"];
+    public IReadOnlyList<string> CultureOptions => _cultureOptions;
     public bool IsControllerMode
     {
         get => _isControllerMode;
@@ -329,9 +439,22 @@ public sealed class LibraryWorkspaceViewModel(
         {
             if (!Set(ref _isControllerMode, value)) return;
             OnPropertyChanged(nameof(IsStandardMode));
+            OnPropertyChanged(nameof(WidePageMaxWidth));
         }
     }
     public bool IsStandardMode => !IsControllerMode;
+    public double WidePageMaxWidth => IsControllerMode ? 1400 : 940;
+
+    public string ControllerConnectionStatus { get => _controllerConnectionStatus; private set => Set(ref _controllerConnectionStatus, value); }
+
+    public void ReportControllerTextEntryHandoff() => Status = "Text entry handoff is active. Use the connected keyboard, then press B to return.";
+
+    public void ReportControllerConnection(bool connected, int controllerIndex, string backendName)
+    {
+        ControllerConnectionStatus = connected
+            ? $"CONNECTED · {backendName} controller {controllerIndex + 1}"
+            : $"NOT DETECTED · {backendName}. Connect a Windows XInput or generic game controller; keyboard navigation remains available.";
+    }
 
     public string SteamGridDbApiKey { get => _steamGridDbApiKey; set => Set(ref _steamGridDbApiKey, value); }
 
@@ -523,6 +646,8 @@ public sealed class LibraryWorkspaceViewModel(
 
     public bool HasDuplicateCandidates => DuplicateCandidates.Count > 0;
 
+    public bool HasLibraryImportPreview => LibraryImportItems.Count > 0;
+
     public bool DuplicateReviewTruncated { get => _duplicateReviewTruncated; private set => Set(ref _duplicateReviewTruncated, value); }
 
     public int SelectedLibraryGameCount => _selectedLibraryGameIds.Count;
@@ -532,6 +657,32 @@ public sealed class LibraryWorkspaceViewModel(
     public string BulkSelectionSummary => SelectedLibraryGameCount == 0
         ? "No games selected"
         : $"{SelectedLibraryGameCount} game(s) selected";
+
+    public string BulkTags { get => _bulkTags; set => Set(ref _bulkTags, value); }
+
+    public string BulkPlatform { get => _bulkPlatform; set => Set(ref _bulkPlatform, value); }
+
+    public string BulkDescription { get => _bulkDescription; set => Set(ref _bulkDescription, value); }
+
+    public LocalProfile? SelectedProfile { get => _selectedProfile; set => Set(ref _selectedProfile, value); }
+
+    public string ProfileName { get => _profileName; set => Set(ref _profileName, value); }
+
+    public string ActiveProfileName => profiles?.ActiveProfile.Name ?? "Default";
+
+    public bool HasMultipleProfiles => LocalProfiles.Count > 1;
+
+    public string? SelectedDiscoveryLocation { get => _selectedDiscoveryLocation; set => Set(ref _selectedDiscoveryLocation, value); }
+
+    public string? SelectedIgnoredDiscoveryPath { get => _selectedIgnoredDiscoveryPath; set => Set(ref _selectedIgnoredDiscoveryPath, value); }
+
+    public bool StartWithWindows { get => _startWithWindows; set => Set(ref _startWithWindows, value); }
+
+    public bool MinimizeToTray { get => _minimizeToTray; set => Set(ref _minimizeToTray, value); }
+
+    public string ImportedProfileName { get => _importedProfileName; set => Set(ref _importedProfileName, value); }
+
+    public bool HasProfileBackupPreview => _profileBackupPreview is not null;
 
     public bool HasMoreLibraryGames => RenderedGames.Count < Games.Count;
 
@@ -544,6 +695,242 @@ public sealed class LibraryWorkspaceViewModel(
     }
 
     public void ClearSmartCollectionFilter() => SmartCollectionFilter = "All games";
+
+    public void ConfigurePortability(LibraryPortabilityCoordinator portability) => _portability = portability;
+
+    public async Task ExportSelectedLibraryEntriesAsync(string destination, CancellationToken cancellationToken)
+    {
+        if (_portability is null) { Status = "Selective library export is unavailable."; return; }
+        var selected = _selectedLibraryGameIds.Count > 0
+            ? _selectedLibraryGameIds.ToArray()
+            : SelectedGame is { } game ? [game.Id] : [];
+        if (selected.Length == 0) { Status = "Select one or more games before exporting."; return; }
+        await using var stream = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None);
+        var result = await _portability.ExportAsync(stream, selected, cancellationToken);
+        Status = result.Message;
+    }
+
+    public async Task PreviewLibraryImportAsync(string source, CancellationToken cancellationToken)
+    {
+        if (_portability is null) { Status = "Selective library import is unavailable."; return; }
+        await using var stream = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var (preview, error) = await _portability.PreviewImportAsync(stream, cancellationToken);
+        LibraryImportItems.Clear();
+        _libraryImportPreview = preview;
+        if (preview is not null)
+            foreach (var item in preview.Items) LibraryImportItems.Add(new(item));
+        OnPropertyChanged(nameof(HasLibraryImportPreview));
+        Status = error ?? $"Previewed {preview!.Items.Count} entry or entries. Review every add, replacement, skip, and rejection before importing.";
+    }
+
+    public async Task CommitLibraryImportAsync(CancellationToken cancellationToken)
+    {
+        if (_portability is null || _libraryImportPreview is null) return;
+        var accepted = LibraryImportItems.Where(static item => item.IsSelected && item.Preview.CanImport)
+            .Select(static item => item.Preview.Index).ToArray();
+        var result = await _portability.CommitImportAsync(_libraryImportPreview, accepted, cancellationToken);
+        Status = result.Message;
+        if (!result.Success) return;
+        LibraryImportItems.Clear();
+        _libraryImportPreview = null;
+        OnPropertyChanged(nameof(HasLibraryImportPreview));
+        RefreshGames();
+    }
+
+    public async Task ApplyReviewedBulkEditsAsync(CancellationToken cancellationToken)
+    {
+        var selected = _selectedLibraryGameIds.ToArray();
+        var result = await library.BulkEditAsync(
+            selected,
+            new BulkLibraryEditDraft(ParseEditableList(BulkTags), BulkPlatform, BulkDescription),
+            cancellationToken);
+        Status = result.Message;
+        if (!result.Success) return;
+        BulkTags = string.Empty;
+        BulkPlatform = string.Empty;
+        BulkDescription = string.Empty;
+        RefreshGames();
+    }
+
+    public async Task AddReviewedSelectionToCollectionAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedCollection is null) { Status = "Choose a reviewed destination collection first."; return; }
+        var result = await collections.SetMembershipsAsync(SelectedCollection.Id, _selectedLibraryGameIds.ToArray(), true, cancellationToken);
+        Status = result.Status == DocumentSaveStatus.Saved
+            ? $"Added {SelectedLibraryGameCount} reviewed game or games to {SelectedCollection.Name}."
+            : result.Error ?? "Bulk collection membership could not be saved.";
+        if (result.Status == DocumentSaveStatus.Saved) RefreshCollections();
+    }
+
+    public async Task CreateLocalProfileAsync(CancellationToken cancellationToken)
+    {
+        if (profiles is null) { Status = "Local profiles are unavailable."; return; }
+        var result = await profiles.CreateAsync(ProfileName, cancellationToken);
+        Status = result.Status == DocumentSaveStatus.Saved ? "Local profile created. Switch explicitly when ready." : result.Error ?? "Profile creation failed.";
+        if (result.Status == DocumentSaveStatus.Saved)
+        {
+            ProfileName = string.Empty;
+            RefreshProfiles();
+        }
+    }
+
+    public async Task SwitchLocalProfileAsync(CancellationToken cancellationToken)
+    {
+        if (profiles is null || SelectedProfile is null) { Status = "Choose a local profile to switch."; return; }
+        var result = await profiles.SwitchAsync(SelectedProfile.Id, cancellationToken);
+        if (result.Status != DocumentSaveStatus.Saved) { Status = result.Error ?? "Profile switch failed."; return; }
+        library.SetActiveProfile(profiles.ActiveProfileId);
+        collections.SetActiveProfile(profiles.ActiveProfileId);
+        themes.SetActiveProfile(profiles.ActiveProfileId);
+        ApplyLibraryPreferences(themes.LibraryPreferences);
+        ApplyHomePreferences(themes.HomePreferences);
+        SelectedGame = null;
+        LibraryCollectionFilter = null;
+        ClearLibrarySelection();
+        RefreshGames();
+        RefreshCollections();
+        RefreshProfiles();
+        OnPropertyChanged(nameof(ActiveProfileName));
+        Status = $"Switched to local profile {profiles.ActiveProfile.Name}. Other profiles remain hidden and unchanged.";
+    }
+
+    public async Task AddDiscoveryLocationAsync(string path, CancellationToken cancellationToken)
+    {
+        if (profiles is null) return;
+        var result = await profiles.AddDiscoveryLocationAsync(path, cancellationToken);
+        Status = result.Status == DocumentSaveStatus.Saved ? "Reusable discovery location added to the active profile." : result.Error ?? "Discovery location could not be added.";
+        if (result.Status == DocumentSaveStatus.Saved) RefreshProfiles();
+    }
+
+    public async Task RemoveSelectedDiscoveryLocationAsync(CancellationToken cancellationToken)
+    {
+        if (profiles is null || SelectedDiscoveryLocation is null) return;
+        var result = await profiles.RemoveDiscoveryLocationAsync(SelectedDiscoveryLocation, cancellationToken);
+        Status = result.Status == DocumentSaveStatus.Saved ? "Discovery location removed. No files were changed." : result.Error ?? "Discovery location could not be removed.";
+        if (result.Status == DocumentSaveStatus.Saved) RefreshProfiles();
+    }
+
+    public async Task AddIgnoredDiscoveryPathAsync(string path, CancellationToken cancellationToken)
+    {
+        if (profiles is null) return;
+        var result = await profiles.AddIgnoredPathAsync(path, cancellationToken);
+        Status = result.Status == DocumentSaveStatus.Saved ? "Ignored path added to the active profile." : result.Error ?? "Ignored path could not be added.";
+        if (result.Status == DocumentSaveStatus.Saved) RefreshProfiles();
+    }
+
+    public async Task RemoveSelectedIgnoredDiscoveryPathAsync(CancellationToken cancellationToken)
+    {
+        if (profiles is null || SelectedIgnoredDiscoveryPath is null) return;
+        var result = await profiles.RemoveIgnoredPathAsync(SelectedIgnoredDiscoveryPath, cancellationToken);
+        Status = result.Status == DocumentSaveStatus.Saved ? "Ignored path removed." : result.Error ?? "Ignored path could not be removed.";
+        if (result.Status == DocumentSaveStatus.Saved) RefreshProfiles();
+    }
+
+    public async Task ApplyStartupBehaviorAsync(CancellationToken cancellationToken)
+    {
+        if (startupIntegration is null) { Status = "Windows startup integration is unavailable."; return; }
+        var previous = startupIntegration.GetStatus();
+        var previousTray = themes.MinimizeToTray;
+        var configured = await startupIntegration.ConfigureAsync(StartWithWindows, cancellationToken);
+        if (!configured.Success)
+        {
+            StartWithWindows = configured.IsEnabled;
+            Status = configured.Message;
+            return;
+        }
+        var error = await themes.ConfigureStartupBehaviorAsync(StartWithWindows, MinimizeToTray, cancellationToken);
+        if (error is not null)
+        {
+            await startupIntegration.ConfigureAsync(previous.IsEnabled, CancellationToken.None);
+            StartWithWindows = previous.IsEnabled;
+            MinimizeToTray = previousTray;
+            Status = error + " The previous Windows startup entry was restored.";
+            return;
+        }
+        Status = $"{configured.Message} Tray behavior is {(MinimizeToTray ? "enabled" : "disabled")}. No scan or network work starts silently.";
+        OnPropertyChanged(nameof(MinimizeToTray));
+    }
+
+    public async Task ExportActiveProfileAsync(string destination, CancellationToken cancellationToken)
+    {
+        if (profilePortability is null) { Status = "Profile backup is unavailable."; return; }
+        await using var stream = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None);
+        var result = await profilePortability.ExportActiveProfileAsync(stream, cancellationToken);
+        Status = result.Message;
+    }
+
+    public async Task PreviewProfileBackupAsync(string source, CancellationToken cancellationToken)
+    {
+        if (profilePortability is null) { Status = "Profile restore is unavailable."; return; }
+        await using var stream = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var (preview, error) = await profilePortability.PreviewAsync(stream, cancellationToken);
+        _profileBackupPreview = preview;
+        ProfileBackupItems.Clear();
+        ProfileBackupScopeNotes.Clear();
+        if (preview is not null)
+        {
+            foreach (var item in preview.Games) ProfileBackupItems.Add(new(item));
+            foreach (var note in preview.ScopeNotes) ProfileBackupScopeNotes.Add(note);
+            ImportedProfileName = $"{preview.Document.ProfileName} (Imported)";
+        }
+        OnPropertyChanged(nameof(HasProfileBackupPreview));
+        Status = error ?? $"Previewed profile backup with {preview!.ValidGameCount} valid game or games. Choose new-profile import or active-profile replacement explicitly.";
+    }
+
+    public Task ImportProfileBackupAsNewAsync(CancellationToken cancellationToken) =>
+        CommitProfileBackupAsync(replaceActive: false, cancellationToken);
+
+    public Task RestoreProfileBackupOverActiveAsync(CancellationToken cancellationToken) =>
+        CommitProfileBackupAsync(replaceActive: true, cancellationToken);
+
+    private async Task CommitProfileBackupAsync(bool replaceActive, CancellationToken cancellationToken)
+    {
+        if (profilePortability is null || _profileBackupPreview is null || profiles is null) return;
+        var accepted = ProfileBackupItems.Where(static item => item.IsSelected && item.Preview.IsValid)
+            .Select(static item => item.Preview.Index).ToArray();
+        var result = await profilePortability.CommitAsync(
+            _profileBackupPreview, accepted, replaceActive, ImportedProfileName, cancellationToken);
+        Status = result.Message;
+        if (!result.Success) return;
+        await profiles.LoadAsync(cancellationToken);
+        await library.LoadAsync(cancellationToken);
+        await collections.LoadAsync(cancellationToken);
+        await themes.ReloadAsync(cancellationToken);
+        library.SetActiveProfile(profiles.ActiveProfileId);
+        collections.SetActiveProfile(profiles.ActiveProfileId);
+        themes.SetActiveProfile(profiles.ActiveProfileId);
+        ApplyLibraryPreferences(themes.LibraryPreferences);
+        ApplyHomePreferences(themes.HomePreferences);
+        SelectedGame = null;
+        LibraryCollectionFilter = null;
+        ClearLibrarySelection();
+        RefreshGames();
+        RefreshCollections();
+        RefreshProfiles();
+        ProfileBackupItems.Clear();
+        ProfileBackupScopeNotes.Clear();
+        _profileBackupPreview = null;
+        OnPropertyChanged(nameof(HasProfileBackupPreview));
+    }
+
+    private void RefreshProfiles()
+    {
+        LocalProfiles.Clear();
+        if (profiles is not null)
+            foreach (var profile in profiles.Profiles.OrderBy(static profile => profile.Name, StringComparer.OrdinalIgnoreCase)) LocalProfiles.Add(profile);
+        SelectedProfile = profiles?.ActiveProfile;
+        DiscoveryLocations.Clear();
+        IgnoredDiscoveryPaths.Clear();
+        if (profiles is not null)
+        {
+            foreach (var path in profiles.ActiveProfile.DiscoveryLocations ?? []) DiscoveryLocations.Add(path);
+            foreach (var path in profiles.ActiveProfile.IgnoredPaths ?? []) IgnoredDiscoveryPaths.Add(path);
+        }
+        SelectedDiscoveryLocation = null;
+        SelectedIgnoredDiscoveryPath = null;
+        OnPropertyChanged(nameof(ActiveProfileName));
+        OnPropertyChanged(nameof(HasMultipleProfiles));
+    }
 
     public bool IsLibraryGameSelected(GameId gameId) => _selectedLibraryGameIds.Contains(gameId);
 
@@ -602,13 +989,13 @@ public sealed class LibraryWorkspaceViewModel(
 
     public double NavigationPaneWidth => IsNavigationCompact ? 82 : 224;
 
-    public string HomeNavigationLabel => IsNavigationCompact ? "⌂" : "⌂  Home";
+    public string HomeNavigationLabel => IsNavigationCompact ? "⌂" : $"⌂  {InterfaceLocalizer.Get(InterfaceText.Home, Culture)}";
 
-    public string LibraryNavigationLabel => IsNavigationCompact ? "▦" : "▦  Library";
+    public string LibraryNavigationLabel => IsNavigationCompact ? "▦" : $"▦  {InterfaceLocalizer.Get(InterfaceText.Library, Culture)}";
 
-    public string SavesNavigationLabel => IsNavigationCompact ? "⇅" : "⇅  Saves";
+    public string SavesNavigationLabel => IsNavigationCompact ? "⇅" : $"⇅  {InterfaceLocalizer.Get(InterfaceText.Saves, Culture)}";
 
-    public string SettingsNavigationLabel => IsNavigationCompact ? "⚙" : "⚙  Settings";
+    public string SettingsNavigationLabel => IsNavigationCompact ? "⚙" : $"⚙  {InterfaceLocalizer.Get(InterfaceText.Settings, Culture)}";
 
     public void NavigateTo(string page)
     {
@@ -682,6 +1069,8 @@ public sealed class LibraryWorkspaceViewModel(
                     ManualDevelopers = JoinEditable(value.Metadata.Developers?.Value);
                     ManualPublishers = JoinEditable(value.Metadata.Publishers?.Value);
                     ManualReleaseDate = value.Metadata.ReleaseDate?.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+                    PersonalNotes = value.Notes ?? string.Empty;
+                    PersonalTags = JoinEditable(value.Tags);
                 }
 
                 OnPropertyChanged(nameof(HasSelection));
@@ -707,6 +1096,7 @@ public sealed class LibraryWorkspaceViewModel(
                 OnPropertyChanged(nameof(SelectedGameWorkingDirectory));
                 OnPropertyChanged(nameof(SelectedGameFavoriteLabel));
                 OnPropertyChanged(nameof(SelectedGameDescription));
+                OnPropertyChanged(nameof(HideSelectedFromSharedScreen));
                 OnPropertyChanged(nameof(CanRunAsAdministrator));
                 OnPropertyChanged(nameof(RunSelectedAsAdministrator));
                 OnPropertyChanged(nameof(CanChangeManualCover));
@@ -720,9 +1110,14 @@ public sealed class LibraryWorkspaceViewModel(
                 OnPropertyChanged(nameof(CanRestoreSelectedSnapshot));
                 RefreshSelectedGameSavePeers();
                 RefreshLaunchActions();
+                RefreshScreenshotGallery();
             }
         }
     }
+
+    public bool HasScreenshotFolders => SelectedGame?.ScreenshotFolders is { Count: > 0 };
+
+    public bool HasScreenshots => ScreenshotGallery.Count > 0;
 
     public GameCollection? SelectedCollection
     {
@@ -787,6 +1182,8 @@ public sealed class LibraryWorkspaceViewModel(
     public string ManualDevelopers { get => _manualDevelopers; set => Set(ref _manualDevelopers, value); }
     public string ManualPublishers { get => _manualPublishers; set => Set(ref _manualPublishers, value); }
     public string ManualReleaseDate { get => _manualReleaseDate; set => Set(ref _manualReleaseDate, value); }
+    public string PersonalNotes { get => _personalNotes; set => Set(ref _personalNotes, value); }
+    public string PersonalTags { get => _personalTags; set => Set(ref _personalTags, value); }
     public string SelectedArtworkKind { get => _selectedArtworkKind; set => Set(ref _selectedArtworkKind, value); }
     public double ArtworkCropX { get => _artworkCropX; set => Set(ref _artworkCropX, value); }
     public double ArtworkCropY { get => _artworkCropY; set => Set(ref _artworkCropY, value); }
@@ -868,7 +1265,11 @@ public sealed class LibraryWorkspaceViewModel(
 
     public bool IsEmpty => Games.Count == 0;
 
-    public int MissingTargetCount => library.Games.Count(static game => !IsTargetAvailable(game));
+    private IEnumerable<LibraryItem> VisibleProfileGames => SharedScreenMode
+        ? library.Games.Where(static game => !game.HiddenFromSharedScreen)
+        : library.Games;
+
+    public int MissingTargetCount => VisibleProfileGames.Count(static game => !IsTargetAvailable(game));
 
     public bool HasMissingTargets => MissingTargetCount > 0;
 
@@ -884,11 +1285,11 @@ public sealed class LibraryWorkspaceViewModel(
 
     public bool HasSaveSyncActivities => SaveSyncActivities.Count > 0;
 
-    public int LibraryGameCount => library.Games.Count;
+    public int LibraryGameCount => VisibleProfileGames.Count();
 
-    public int FavoriteGameCount => library.Games.Count(static game => game.IsFavorite);
+    public int FavoriteGameCount => VisibleProfileGames.Count(static game => game.IsFavorite);
 
-    public string TotalLibraryPlayTime => FormatPlayTime(TimeSpan.FromTicks(library.Games.Sum(static game => game.TotalPlayTime.Ticks)));
+    public string TotalLibraryPlayTime => FormatPlayTime(TimeSpan.FromTicks(VisibleProfileGames.Sum(static game => game.TotalPlayTime.Ticks)));
 
     public bool HasSteamPreview => SteamPreviewItems.Count > 0 || SteamImportFailures.Count > 0;
 
@@ -949,9 +1350,24 @@ public sealed class LibraryWorkspaceViewModel(
             saveSync.TransferProgressChanged += OnSaveTransferProgress;
             _saveTransferProgressSubscribed = true;
         }
+        if (!_gameTransferScanProgressSubscribed && gameTransfers is not null)
+        {
+            gameTransfers.ScanProgressChanged += OnGameTransferScanProgress;
+            _gameTransferScanProgressSubscribed = true;
+        }
         await RunBusyAsync(async () =>
         {
             var themeWarning = await themes.InitializeAsync(cancellationToken);
+            StartWithWindows = themes.StartWithWindows;
+            MinimizeToTray = themes.MinimizeToTray;
+            if (profiles is not null)
+            {
+                await profiles.LoadAsync(cancellationToken);
+                library.SetActiveProfile(profiles.ActiveProfileId);
+                collections.SetActiveProfile(profiles.ActiveProfileId);
+                themes.SetActiveProfile(profiles.ActiveProfileId);
+                RefreshProfiles();
+            }
             IsControllerMode = themes.ControllerMode;
             ApplyLibraryPreferences(themes.LibraryPreferences);
             ApplyHomePreferences(themes.HomePreferences);
@@ -1300,7 +1716,7 @@ public sealed class LibraryWorkspaceViewModel(
                 AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.System,
                 MaxRecursionDepth = 12,
             })
-                .Where(path => !known.Contains(Path.GetFullPath(path)))
+                .Where(path => !known.Contains(Path.GetFullPath(path)) && !IsIgnoredDiscoveryPath(path))
                 .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
                 .Take(501)
                 .ToArray(), cancellationToken);
@@ -1318,6 +1734,42 @@ public sealed class LibraryWorkspaceViewModel(
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         { Status = $"Folder discovery stopped safely: {exception.Message}"; }
+    }
+
+    public bool SharedScreenMode
+    {
+        get => _sharedScreenMode;
+        set
+        {
+            if (!Set(ref _sharedScreenMode, value)) return;
+            SelectedGame = null;
+            RefreshGames();
+            PersistLibraryPreferences();
+        }
+    }
+
+    public bool HideSelectedFromSharedScreen => SelectedGame?.HiddenFromSharedScreen == true;
+
+    public async Task ToggleSelectedSharedScreenVisibilityAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null) return;
+        var hidden = !SelectedGame.HiddenFromSharedScreen;
+        var result = await library.SetHiddenFromSharedScreenAsync(SelectedGame.Id, hidden, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved) { Status = result.Error ?? "Shared-screen visibility could not be saved."; return; }
+        SelectedGame = result.Item;
+        OnPropertyChanged(nameof(HideSelectedFromSharedScreen));
+        RefreshGames();
+        Status = hidden
+            ? "This game is hidden from shared-screen browsing. This is presentation only, not parental-control security."
+            : "This game is visible in shared-screen browsing.";
+    }
+
+    private bool IsIgnoredDiscoveryPath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        return (profiles?.ActiveProfile.IgnoredPaths ?? []).Any(ignored =>
+            string.Equals(fullPath, ignored, StringComparison.OrdinalIgnoreCase) ||
+            fullPath.StartsWith(ignored + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task ImportSelectedDiscoveredGamesAsync(CancellationToken cancellationToken)
@@ -1466,6 +1918,83 @@ public sealed class LibraryWorkspaceViewModel(
         SelectedGame = result.Item;
         RefreshGames();
         Status = "Manual metadata saved with protected provenance. Provider refresh will not overwrite these fields.";
+    }
+
+    public async Task SavePersonalWorkspaceAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null) return;
+        var result = await library.SetNotesAndTagsAsync(
+            SelectedGame.Id,
+            PersonalNotes,
+            ParseEditableList(PersonalTags),
+            cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved)
+        {
+            Status = result.Error ?? "Notes and tags could not be saved.";
+            return;
+        }
+
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = "Notes and tags saved locally.";
+    }
+
+    public async Task AddSelectedScreenshotFolderAsync(string folder, CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null) return;
+        var folders = (SelectedGame.ScreenshotFolders ?? []).Append(folder).ToArray();
+        var result = await library.SetScreenshotFoldersAsync(SelectedGame.Id, folders, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved)
+        {
+            Status = result.Error ?? "The screenshot folder could not be saved.";
+            return;
+        }
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = $"Loaded {ScreenshotGallery.Count} local screenshot(s). NovaLauncher does not capture or upload them.";
+    }
+
+    public async Task ClearSelectedScreenshotFoldersAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedGame is null) return;
+        var result = await library.SetScreenshotFoldersAsync(SelectedGame.Id, null, cancellationToken);
+        if (result.Status != LibraryMutationStatus.Saved)
+        {
+            Status = result.Error ?? "Screenshot folders could not be cleared.";
+            return;
+        }
+        SelectedGame = result.Item;
+        RefreshGames();
+        Status = "Screenshot folders removed from NovaLauncher. No image files were deleted.";
+    }
+
+    private void RefreshScreenshotGallery()
+    {
+        ScreenshotGallery.Clear();
+        var files = (SelectedGame?.ScreenshotFolders ?? [])
+            .Where(Directory.Exists)
+            .SelectMany(EnumerateScreenshotFiles)
+            .Where(static path => Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".webp")
+            .Select(static path => new FileInfo(path))
+            .Where(static file => file.Length is > 0 and <= 25 * 1024 * 1024)
+            .OrderByDescending(static file => file.LastWriteTimeUtc)
+            .Take(200);
+        foreach (var file in files)
+            ScreenshotGallery.Add(new(file.FullName, file.Name, file.LastWriteTimeUtc));
+        OnPropertyChanged(nameof(HasScreenshotFolders));
+        OnPropertyChanged(nameof(HasScreenshots));
+    }
+
+    private static IEnumerable<string> EnumerateScreenshotFiles(string folder)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly).ToArray();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     public async Task RestoreProviderMetadataAsync(CancellationToken cancellationToken)
@@ -1628,13 +2157,169 @@ public sealed class LibraryWorkspaceViewModel(
         await PreviewSelectedGameTransferAsync(cancellationToken);
     }
 
+    public async Task ConfigurePrivateDestinationAsync(CancellationToken cancellationToken)
+    {
+        if (privateDestinations is null) { Status = "Private snapshot destinations are unavailable."; return; }
+        long bytes;
+        try { bytes = checked(PrivateDestinationBudgetMiB * 1024 * 1024); }
+        catch (OverflowException) { Status = "The destination budget is too large."; return; }
+        var result = await privateDestinations.ConfigureAsync(new(PrivateDestinationPath, bytes, PrivateDestinationRetention, SyncPrivateMetadata), cancellationToken);
+        Status = result.Message;
+        await RefreshPrivateDestinationHealthAsync(cancellationToken);
+    }
+
+    public async Task PreviewPrivateDestinationPublishAsync(CancellationToken cancellationToken)
+    {
+        if (privateDestinations is null || PrivateDestinationGame is null) { Status = "Choose a game with retained snapshots first."; return; }
+        var gameId = PrivateDestinationGame.SaveSyncId is { } shared ? new GameId(shared) : PrivateDestinationGame.Id;
+        var (preview, error) = await privateDestinations.PreviewPublishAsync(gameId, cancellationToken);
+        DestinationPublishPreview = preview;
+        Status = error ?? preview!.Summary;
+    }
+
+    public async Task PublishPrivateDestinationAsync(CancellationToken cancellationToken)
+    {
+        if (privateDestinations is null || DestinationPublishPreview is null) return;
+        var result = await privateDestinations.PublishAsync(DestinationPublishPreview, cancellationToken);
+        DestinationPublishPreview = null;
+        Status = result.Message;
+        await RefreshPrivateDestinationHealthAsync(cancellationToken);
+        await RefreshPrivateDestinationSnapshotsAsync(cancellationToken);
+    }
+
+    public async Task RefreshPrivateDestinationSnapshotsAsync(CancellationToken cancellationToken)
+    {
+        PrivateDestinationSnapshots.Clear();
+        if (privateDestinations is null || PrivateDestinationGame is null) return;
+        var gameId = PrivateDestinationGame.SaveSyncId is { } shared ? new GameId(shared) : PrivateDestinationGame.Id;
+        foreach (var item in await privateDestinations.GetDestinationSnapshotsAsync(gameId, cancellationToken)) PrivateDestinationSnapshots.Add(item);
+    }
+
+    public async Task PreviewPrivateDestinationRepairAsync(CancellationToken cancellationToken)
+    {
+        if (privateDestinations is null || PrivateDestinationGame is null || PrivateDestinationSnapshot is null) { Status = "Choose a destination snapshot to quarantine."; return; }
+        var gameId = PrivateDestinationGame.SaveSyncId is { } shared ? new GameId(shared) : PrivateDestinationGame.Id;
+        var (preview, error) = await privateDestinations.PreviewQuarantineAsync(gameId, PrivateDestinationSnapshot.SnapshotId, cancellationToken);
+        DestinationRepairPreview = preview;
+        Status = error ?? preview!.Summary;
+    }
+
+    public async Task QuarantinePrivateDestinationSnapshotAsync(CancellationToken cancellationToken)
+    {
+        if (privateDestinations is null || DestinationRepairPreview is null) return;
+        var result = await privateDestinations.QuarantineAsync(DestinationRepairPreview, cancellationToken);
+        DestinationRepairPreview = null;
+        Status = result.Message;
+        await RefreshPrivateDestinationHealthAsync(cancellationToken);
+    }
+
+    public async Task RefreshPrivateDestinationHealthAsync(CancellationToken cancellationToken)
+    {
+        PrivateDestinationHealth.Clear();
+        if (privateDestinations is null) return;
+        foreach (var item in await privateDestinations.GetHealthHistoryAsync(cancellationToken)) PrivateDestinationHealth.Add(item);
+    }
+
+    public async Task PreviewPrivateMetadataPushAsync(CancellationToken cancellationToken)
+    {
+        if (privateDestinations is null || PrivateDestinationGame is null || !SyncPrivateMetadata) { Status = "Enable notes-and-tags sync and choose a game first."; return; }
+        var game = PrivateDestinationGame;
+        var identity = game.SaveSyncId is { } shared ? new GameId(shared) : game.Id;
+        var entry = new PrivateMetadataEntry(identity, game.Name, game.Notes, game.Tags ?? [], game.UpdatedAtUtc);
+        var (preview, error) = await privateDestinations.PreviewMetadataPushAsync(entry, cancellationToken);
+        PrivateMetadataPreview = preview;
+        Status = error ?? preview!.Summary;
+    }
+
+    public async Task PreviewPrivateMetadataPullAsync(CancellationToken cancellationToken)
+    {
+        if (privateDestinations is null || PrivateDestinationGame is null || !SyncPrivateMetadata) { Status = "Enable notes-and-tags sync and choose a game first."; return; }
+        var identity = PrivateDestinationGame.SaveSyncId is { } shared ? new GameId(shared) : PrivateDestinationGame.Id;
+        var (preview, error) = await privateDestinations.PreviewMetadataPullAsync(identity, cancellationToken);
+        PrivateMetadataPreview = preview;
+        Status = error ?? preview!.Summary;
+    }
+
+    public async Task CommitPrivateMetadataAsync(CancellationToken cancellationToken)
+    {
+        if (privateDestinations is null || PrivateMetadataPreview is null || PrivateDestinationGame is null) return;
+        var preview = PrivateMetadataPreview;
+        if (preview.Direction == "Push")
+        {
+            var result = await privateDestinations.CommitMetadataPushAsync(preview, cancellationToken);
+            Status = result.Message;
+        }
+        else
+        {
+            var (entry, error) = await privateDestinations.CommitMetadataPullAsync(preview, cancellationToken);
+            if (entry is null) Status = error ?? "The metadata package could not be applied.";
+            else
+            {
+                var result = await library.SetNotesAndTagsAsync(PrivateDestinationGame.Id, entry.Notes, entry.Tags, cancellationToken);
+                if (result.Item is not null) PrivateDestinationGame = result.Item;
+                Status = result.Error ?? "Reviewed notes and tags applied locally; executable and provider data were unchanged.";
+                RefreshGames();
+            }
+        }
+        PrivateMetadataPreview = null;
+        await RefreshPrivateDestinationHealthAsync(cancellationToken);
+    }
+
+    public async Task ApplyAccessibilityPreferencesAsync(CancellationToken cancellationToken)
+    {
+        var error = await themes.ConfigureAccessibilityAsync(
+            new AccessibilityPreferences(TextScale, FocusScale, ContrastPreset, ShowControllerHints, Culture),
+            cancellationToken);
+        Status = error ?? InterfaceLocalizer.Get(InterfaceText.AccessibilityApplied, Culture);
+    }
+
+    private void OnGameTransferScanProgress(GameTransferScanProgress progress)
+    {
+        if (_uiContext is { } context) context.Post(static state =>
+        {
+            var (workspace, update) = ((LibraryWorkspaceViewModel, GameTransferScanProgress))state!;
+            workspace.ApplyGameTransferScanProgress(update);
+        }, (this, progress));
+        else ApplyGameTransferScanProgress(progress);
+    }
+
+    private void ApplyGameTransferScanProgress(GameTransferScanProgress progress)
+    {
+        var percent = progress.TotalBytes <= 0 ? 100d : Math.Clamp(progress.CompletedBytes * 100d / progress.TotalBytes, 0, 100);
+        GameTransferStatus = $"Hashing {progress.CompletedFiles:N0}/{progress.TotalFiles:N0} files ({percent:F1}%): {progress.RelativePath}";
+    }
+
     public async Task AuthorizeSelectedGameTransferAsync(CancellationToken cancellationToken)
     {
+        if (IsGameTransferAuthorizing)
+        {
+            GameTransferStatus = "Authorization is already revalidating this folder. Wait for it to finish.";
+            return;
+        }
         if (gameTransfers is null || SelectedGame is null || GameTransferPreview is null || SelectedTrustedPeer is null)
         { GameTransferStatus = "Create a preview and select one active trusted recipient."; return; }
-        var result = await gameTransfers.AuthorizeAsync(SelectedGame, GameTransferPreview, [SelectedTrustedPeer.DeviceId], GameTransferRightsAttested, cancellationToken);
-        GameTransferStatus = result.Message;
-        await RefreshGameTransferHistoryAsync(cancellationToken);
+        IsGameTransferAuthorizing = true;
+        GameTransferStatus = $"Revalidating {GameTransferPreview.Files.Count:N0} files before authorization. Large folders can take as long as the original scan; keep NovaLauncher open.";
+        try
+        {
+            var result = await gameTransfers.AuthorizeAsync(SelectedGame, GameTransferPreview, [SelectedTrustedPeer.DeviceId], GameTransferRightsAttested, cancellationToken);
+            GameTransferStatus = result.Message;
+            await RefreshGameTransferHistoryAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            GameTransferStatus = "Authorization was cancelled before the 24-hour offer was created.";
+            throw;
+        }
+        catch (Exception exception)
+        {
+            GameTransferStatus = $"Authorization failed: {exception.Message}";
+            throw;
+        }
+        finally
+        {
+            IsGameTransferAuthorizing = false;
+        }
     }
 
     public async Task RefreshPeerGameTransferOffersAsync(CancellationToken cancellationToken)
@@ -1806,9 +2491,31 @@ public sealed class LibraryWorkspaceViewModel(
     {
         var error = await themes.ConfigureControllerModeAsync(enabled, cancellationToken);
         if (error is not null) { Status = error; return; }
+        if (enabled && !IsControllerMode)
+        {
+            _pageBeforeController = CurrentPage;
+            _backHistoryBeforeController = _backHistory.ToArray();
+            _forwardHistoryBeforeController = _forwardHistory.ToArray();
+            _backHistory.Clear();
+            _forwardHistory.Clear();
+            NavigateCore("Home", false);
+        }
         IsControllerMode = enabled;
+        if (!enabled && _pageBeforeController is { } previousPage)
+        {
+            NavigateCore(previousPage, false);
+            _backHistory.Clear();
+            _forwardHistory.Clear();
+            foreach (var page in _backHistoryBeforeController.Reverse()) _backHistory.Push(page);
+            foreach (var page in _forwardHistoryBeforeController.Reverse()) _forwardHistory.Push(page);
+            _pageBeforeController = null;
+            _backHistoryBeforeController = [];
+            _forwardHistoryBeforeController = [];
+            OnPropertyChanged(nameof(CanNavigateBack));
+            OnPropertyChanged(nameof(CanNavigateForward));
+        }
         Status = enabled
-            ? "Controller mode enabled. Use directional navigation and Enter/A to choose; Escape/B exits."
+            ? "Controller mode enabled. Detecting an XInput-compatible controller; keyboard navigation remains available."
             : "Controller mode exited.";
     }
 
@@ -2285,13 +2992,14 @@ public sealed class LibraryWorkspaceViewModel(
         _selectedLibraryGameIds.RemoveWhere(id => library.Games.All(game => game.Id != id));
         _libraryRenderLimit = LibraryRenderPageSize;
         Games.Clear();
-        IEnumerable<LibraryItem> query = library.Games;
+        IEnumerable<LibraryItem> query = VisibleProfileGames;
         if (!string.IsNullOrWhiteSpace(SearchText))
         {
             var search = SearchText.Trim();
             query = query.Where(game => game.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
                 || game.Platform.Contains(search, StringComparison.OrdinalIgnoreCase)
-                || game.Source.Contains(search, StringComparison.OrdinalIgnoreCase));
+                || game.Source.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || game.Tags?.Any(tag => tag.Contains(search, StringComparison.OrdinalIgnoreCase)) == true);
         }
         if (FavoritesOnly) query = query.Where(static game => game.IsFavorite);
         if (SourceFilter != "All sources") query = query.Where(game => string.Equals(game.Source, SourceFilter, StringComparison.OrdinalIgnoreCase));
@@ -2305,6 +3013,11 @@ public sealed class LibraryWorkspaceViewModel(
             "Missing targets" => query.Where(static game => !IsTargetAvailable(game)),
             _ => query,
         };
+        if (SmartCollectionFilter.StartsWith("Tag: ", StringComparison.Ordinal))
+        {
+            var tag = SmartCollectionFilter[5..];
+            query = query.Where(game => game.Tags?.Contains(tag, StringComparer.OrdinalIgnoreCase) == true);
+        }
         if (PlatformFilter != "All platforms")
         {
             query = PlatformFilter == "Other"
@@ -2331,6 +3044,7 @@ public sealed class LibraryWorkspaceViewModel(
         {
             Games.Add(game);
         }
+        RefreshTagSmartCollections();
         RefreshRenderedGames();
 
         OnPropertyChanged(nameof(IsEmpty));
@@ -2340,7 +3054,7 @@ public sealed class LibraryWorkspaceViewModel(
         OnPropertyChanged(nameof(FavoriteGameCount));
         OnPropertyChanged(nameof(TotalLibraryPlayTime));
         HomeGames.Clear();
-        foreach (var game in library.Query(string.Empty, false, LibrarySort.RecentlyUpdated)
+        foreach (var game in VisibleProfileGames
                      .OrderByDescending(static item => item.IsFavorite)
                      .ThenByDescending(static item => item.UpdatedAtUtc)
                      .Take(8))
@@ -2349,7 +3063,7 @@ public sealed class LibraryWorkspaceViewModel(
         }
 
         ContinuePlayingGames.Clear();
-        foreach (var game in library.Games
+        foreach (var game in VisibleProfileGames
                      .Where(static item => item.LastPlayedAtUtc is not null)
                      .OrderByDescending(static item => item.LastPlayedAtUtc)
                      .Take(6))
@@ -2358,7 +3072,7 @@ public sealed class LibraryWorkspaceViewModel(
         }
 
         MostPlayedGames.Clear();
-        foreach (var game in library.Games
+        foreach (var game in VisibleProfileGames
                      .Where(static item => item.TotalPlayTime > TimeSpan.Zero)
                      .OrderByDescending(static item => item.TotalPlayTime)
                      .ThenBy(static item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -2368,8 +3082,8 @@ public sealed class LibraryWorkspaceViewModel(
         }
 
         FeaturedGame = ContinuePlayingGames.FirstOrDefault()
-            ?? library.Games.Where(static item => item.IsFavorite).OrderByDescending(static item => item.UpdatedAtUtc).FirstOrDefault()
-            ?? library.Games.OrderByDescending(static item => item.AddedAtUtc).FirstOrDefault();
+            ?? VisibleProfileGames.Where(static item => item.IsFavorite).OrderByDescending(static item => item.UpdatedAtUtc).FirstOrDefault()
+            ?? VisibleProfileGames.OrderByDescending(static item => item.AddedAtUtc).FirstOrDefault();
         OnPropertyChanged(nameof(FeaturedGame));
         OnPropertyChanged(nameof(HasFeaturedGame));
         OnPropertyChanged(nameof(HasContinuePlayingGames));
@@ -2377,6 +3091,22 @@ public sealed class LibraryWorkspaceViewModel(
         RefreshHomeSections();
         RefreshDuplicateCandidates();
         NotifyLibrarySelectionChanged();
+    }
+
+    private void RefreshTagSmartCollections()
+    {
+        var desired = VisibleProfileGames
+            .SelectMany(static game => game.Tags ?? [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .Select(static tag => $"Tag: {tag}")
+            .ToArray();
+        var existing = SmartCollectionOptions.Where(static option => option.StartsWith("Tag: ", StringComparison.Ordinal)).ToArray();
+        if (existing.SequenceEqual(desired, StringComparer.Ordinal)) return;
+        foreach (var option in existing) SmartCollectionOptions.Remove(option);
+        foreach (var option in desired) SmartCollectionOptions.Add(option);
+        if (SmartCollectionFilter.StartsWith("Tag: ", StringComparison.Ordinal) && !desired.Contains(SmartCollectionFilter, StringComparer.Ordinal))
+            SmartCollectionFilter = "All games";
     }
 
     private void NotifyLibrarySelectionChanged()
@@ -2553,6 +3283,7 @@ public sealed class LibraryWorkspaceViewModel(
             PlatformFilter = preferences.PlatformFilter;
             AvailabilityFilter = preferences.AvailabilityFilter;
             FavoritesOnly = preferences.FavoritesOnly;
+            SharedScreenMode = preferences.SharedScreenMode;
         }
         finally
         {
@@ -2654,7 +3385,8 @@ public sealed class LibraryWorkspaceViewModel(
                 SourceFilter,
                 PlatformFilter,
                 AvailabilityFilter,
-                FavoritesOnly), CancellationToken.None);
+                FavoritesOnly,
+                SharedScreenMode), CancellationToken.None);
             if (error is not null) Status = error;
         }
         catch (Exception exception)

@@ -14,6 +14,7 @@ namespace NovaLauncher.Infrastructure.Persistence;
 [JsonSerializable(typeof(SettingsDocument))]
 [JsonSerializable(typeof(AchievementsDocument))]
 [JsonSerializable(typeof(SaveSyncDocument))]
+[JsonSerializable(typeof(ProfilesDocument))]
 [JsonSerializable(typeof(List<LibraryItem>))]
 [ExcludeFromCodeCoverage(Justification = "System.Text.Json source generation supplies the executable members.")]
 internal sealed partial class PersistenceJsonContext : JsonSerializerContext;

@@ -58,12 +58,12 @@ jobs:
           NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:NOVALAUNCHER_SIGNING_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD)) {
-            throw 'Phase 6 releases require the NovaLauncher code-signing certificate and password secrets.'
+            throw 'Signed releases require the NovaLauncher code-signing certificate and password secrets.'
           }
           $certificatePath = Join-Path $env:RUNNER_TEMP 'novalauncher-signing.pfx'
           [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:NOVALAUNCHER_SIGNING_CERTIFICATE_BASE64))
           try {
-            .\eng\Build-Release.ps1 -DotNetPath (Get-Command dotnet).Source -SigningCertificatePath $certificatePath -SigningCertificatePassword $env:NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD
+            .\scripts\Build-Release.ps1 -DotNetPath (Get-Command dotnet).Source -SigningCertificatePath $certificatePath -SigningCertificatePassword $env:NOVALAUNCHER_SIGNING_CERTIFICATE_PASSWORD
           } finally {
             Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
           }

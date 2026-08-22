@@ -2,6 +2,7 @@ using NovaLauncher.Application.Persistence;
 using NovaLauncher.Application.Themes;
 using NovaLauncher.Domain.Settings;
 using NovaLauncher.Application.SaveSync;
+using NovaLauncher.Domain.Profiles;
 
 namespace NovaLauncher.Application.Tests;
 
@@ -68,7 +69,7 @@ public sealed class ThemeServiceTests
 
         Assert.Null(await service.SaveLibraryPreferencesAsync(preferences, CancellationToken.None));
         Assert.Equal(preferences, service.LibraryPreferences);
-        Assert.Equal("List", store.Value!.Settings.LibraryViewMode);
+        Assert.Equal("List", store.Value!.Settings.ProfileViews![LocalProfileDefaults.DefaultProfileId.ToString("N")].LibraryViewMode);
 
         var invalid = preferences with { ViewMode = "Downloaded view" };
         Assert.NotNull(await service.SaveLibraryPreferencesAsync(invalid, CancellationToken.None));
@@ -92,7 +93,7 @@ public sealed class ThemeServiceTests
         Assert.Null(await service.SaveHomePreferencesAsync(preferences, CancellationToken.None));
         Assert.Equal(preferences.SectionOrder, service.HomePreferences.SectionOrder);
         Assert.Contains("RecentlyPlayed", service.HomePreferences.HiddenSections);
-        Assert.Equal("MostPlayed,Highlights,RecentlyPlayed", store.Value!.Settings.HomeSectionOrder);
+        Assert.Equal("MostPlayed,Highlights,RecentlyPlayed", store.Value!.Settings.ProfileViews![LocalProfileDefaults.DefaultProfileId.ToString("N")].HomeSectionOrder);
 
         var invalid = preferences with { SectionOrder = ["MostPlayed", "Highlights", "Downloaded"] };
         Assert.NotNull(await service.SaveHomePreferencesAsync(invalid, CancellationToken.None));
@@ -108,6 +109,72 @@ public sealed class ThemeServiceTests
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ApplyAsync("forest", cancellation.Token));
+    }
+
+    [Fact]
+    public async Task AccessibilityPreferencesPersistRejectInvalidValuesAndRollBackOnFailure()
+    {
+        var host = new Host();
+        var store = new Store(SettingsDocument.Default);
+        using var service = new ThemeService(host, store);
+        await service.InitializeAsync(CancellationToken.None);
+        var selected = new AccessibilityPreferences(1.5, 1.75, "High", false, "en-US");
+
+        Assert.Null(await service.ConfigureAccessibilityAsync(selected, CancellationToken.None));
+        Assert.Equal(selected, service.Accessibility);
+        Assert.Equal(selected, host.LastAccessibility);
+        Assert.Equal("en-US", store.Value!.Settings.Culture);
+        Assert.NotNull(await service.ConfigureAccessibilityAsync(selected with { TextScale = 2.25 }, CancellationToken.None));
+
+        store.FailSave = true;
+        Assert.NotNull(await service.ConfigureAccessibilityAsync(selected with { FocusScale = 1.5 }, CancellationToken.None));
+        Assert.Equal(selected, service.Accessibility);
+
+        store.FailSave = false;
+        Assert.Null(await service.ApplyAsync("forest", CancellationToken.None));
+        Assert.Equal(selected, host.LastAccessibility);
+    }
+
+    [Fact]
+    public async Task LibraryAndHomePreferencesAreIsolatedPerLocalProfile()
+    {
+        var store = new Store(SettingsDocument.Default);
+        using var service = new ThemeService(new Host(), store);
+        await service.InitializeAsync(CancellationToken.None);
+        var second = Guid.NewGuid();
+
+        await service.SaveLibraryPreferencesAsync(
+            new LibraryViewPreferences("List", "Large", "Playtime", "Manual", "Windows", "Available", true, true),
+            CancellationToken.None);
+        service.SetActiveProfile(second);
+        Assert.Equal("Grid", service.LibraryPreferences.ViewMode);
+        await service.SaveHomePreferencesAsync(
+            new HomeViewPreferences(["MostPlayed", "Highlights", "RecentlyPlayed"], new HashSet<string>(["Highlights"])),
+            CancellationToken.None);
+
+        Assert.Equal("Grid", service.LibraryPreferences.ViewMode);
+        Assert.Equal("MostPlayed", service.HomePreferences.SectionOrder[0]);
+        service.SetActiveProfile(LocalProfileDefaults.DefaultProfileId);
+        Assert.Equal("List", service.LibraryPreferences.ViewMode);
+        Assert.True(service.LibraryPreferences.SharedScreenMode);
+        Assert.Equal("Highlights", service.HomePreferences.SectionOrder[0]);
+    }
+
+    [Fact]
+    public async Task StartupAndTrayRemainDisabledByDefaultAndPersistExplicitly()
+    {
+        var store = new Store(SettingsDocument.Default);
+        using var service = new ThemeService(new Host(), store);
+        await service.InitializeAsync(CancellationToken.None);
+
+        Assert.False(service.StartWithWindows);
+        Assert.False(service.MinimizeToTray);
+        Assert.Null(await service.ConfigureStartupBehaviorAsync(true, true, CancellationToken.None));
+        Assert.True(service.StartWithWindows);
+        Assert.True(service.MinimizeToTray);
+        Assert.Null(await service.ConfigureStartupBehaviorAsync(false, false, CancellationToken.None));
+        Assert.False(store.Value!.Settings.StartWithWindows);
+        Assert.False(store.Value.Settings.MinimizeToTray);
     }
 
     [Theory]
@@ -137,8 +204,10 @@ public sealed class ThemeServiceTests
     {
         public string CurrentThemeId { get; private set; } = "nova-dark";
         public bool ReduceMotion { get; private set; }
+        public AccessibilityPreferences? LastAccessibility { get; private set; }
         public bool Apply(string themeId) { CurrentThemeId = themeId; return true; }
         public bool ApplyMotionPreference(bool reduceMotion) { ReduceMotion = reduceMotion; return true; }
+        public bool ApplyAccessibility(AccessibilityPreferences preferences) { LastAccessibility = preferences; return true; }
     }
 
     private sealed class Store(SettingsDocument initial) : IDocumentStore<SettingsDocument>

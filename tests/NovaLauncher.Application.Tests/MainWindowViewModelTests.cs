@@ -10,6 +10,6 @@ public sealed class MainWindowViewModelTests
         var viewModel = new MainWindowViewModel();
 
         Assert.Equal("NovaLauncher", viewModel.ProductName);
-        Assert.Contains("later verified increments", viewModel.Status, StringComparison.Ordinal);
+        Assert.Contains("NovaLauncher is ready", viewModel.Status, StringComparison.Ordinal);
     }
 }

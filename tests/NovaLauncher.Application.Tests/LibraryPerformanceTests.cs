@@ -11,7 +11,7 @@ public sealed class LibraryPerformanceTests
     public async Task WarmSearchP95StaysUnderOneHundredMillisecondsForTenThousandGames()
     {
         var games = Enumerable.Range(1, 10_000).Select(CreateGame).ToArray();
-        using var library = new LibraryCoordinator(new Store(new GamesDocument(1, games)), new ManualGameDraftValidator(), TimeProvider.System);
+        using var library = new LibraryCoordinator(new Store(new GamesDocument(GamesDocument.CurrentSchemaVersion, games)), new ManualGameDraftValidator(), TimeProvider.System);
         await library.LoadAsync(CancellationToken.None);
         _ = library.Query("game 99", false, LibrarySort.Name);
         var samples = new List<double>();
@@ -27,6 +27,33 @@ public sealed class LibraryPerformanceTests
         samples.Sort();
         var p95 = samples[(int)Math.Ceiling(samples.Count * 0.95) - 1];
         Assert.True(p95 < 100, $"Warm search p95 was {p95:F2} ms on this runner.");
+    }
+
+    [Fact]
+    public async Task TwentyThousandGamesAcrossProfilesStayIsolatedAndWithinStartupSearchMemoryBudgets()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        var baselineBytes = GC.GetTotalMemory(forceFullCollection: true);
+        var secondProfile = Guid.NewGuid();
+        var games = Enumerable.Range(1, 20_000)
+            .Select(value => CreateGame(value) with { ProfileId = value <= 10_000 ? NovaLauncher.Domain.Profiles.LocalProfileDefaults.DefaultProfileId : secondProfile })
+            .ToArray();
+        using var library = new LibraryCoordinator(new Store(new GamesDocument(GamesDocument.CurrentSchemaVersion, games)), new ManualGameDraftValidator(), TimeProvider.System);
+        var stopwatch = Stopwatch.StartNew();
+
+        await library.LoadAsync(CancellationToken.None);
+        library.SetActiveProfile(secondProfile);
+        var result = library.Query("game 199", false, LibrarySort.Name);
+        stopwatch.Stop();
+
+        Assert.Equal(10_000, library.Games.Count);
+        Assert.NotEmpty(result);
+        Assert.All(result, game => Assert.Equal(secondProfile, game.ProfileId));
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"Multi-profile load, switch, and search took {stopwatch.Elapsed.TotalMilliseconds:F2} ms.");
+        var retainedBytes = GC.GetTotalMemory(forceFullCollection: true) - baselineBytes;
+        Assert.True(retainedBytes < 128L * 1024 * 1024, $"20,000-game multi-profile fixture retained {retainedBytes / (1024d * 1024):F2} MiB.");
     }
 
     private static LibraryItem CreateGame(int value)

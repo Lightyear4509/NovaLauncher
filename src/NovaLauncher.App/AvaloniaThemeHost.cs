@@ -58,6 +58,25 @@ public sealed class AvaloniaThemeHost : IThemeHost
         return true;
     }
 
+    public bool ApplyAccessibility(AccessibilityPreferences preferences)
+    {
+        if (!Dispatcher.UIThread.CheckAccess()) return Dispatcher.UIThread.Invoke(() => ApplyAccessibility(preferences));
+        if (Avalonia.Application.Current is null) return false;
+        var resources = Avalonia.Application.Current.Resources;
+        resources["InterfaceFontSize"] = 14d * preferences.TextScale;
+        resources["FocusBorderThickness"] = new Thickness(2d * preferences.FocusScale);
+        resources["ControllerHintsVisible"] = preferences.ShowControllerHints;
+        if (preferences.ContrastPreset == "High")
+        {
+            resources["ThemeText"] = Brushes.White;
+            resources["ThemeMuted"] = Brush.Parse("#E5E7EB");
+            resources["ThemeBorder"] = Brushes.White;
+            resources["ThemeAccent"] = Brush.Parse("#00E5FF");
+        }
+        else Apply(CurrentThemeId);
+        return true;
+    }
+
     private sealed record Palette(
         string Background,
         string Surface,

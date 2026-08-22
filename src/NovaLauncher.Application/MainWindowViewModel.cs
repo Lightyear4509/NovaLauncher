@@ -8,7 +8,7 @@ public sealed class MainWindowViewModel
     private readonly string _productName = ProductIdentity.Name;
     private readonly string _version = ProductIdentity.Version;
     private readonly string _heading = "Your games, one calm home.";
-    private readonly string _status = "Foundation ready. Library features arrive in later verified increments.";
+    private readonly string _status = "NovaLauncher is ready. Add a local game or import your Steam library.";
 
     public MainWindowViewModel()
     {

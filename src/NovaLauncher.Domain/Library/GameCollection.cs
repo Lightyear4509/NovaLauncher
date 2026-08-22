@@ -11,4 +11,5 @@ public sealed record GameCollection(
     string Name,
     IReadOnlyList<GameId> GameIds,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    Guid? ProfileId = null);

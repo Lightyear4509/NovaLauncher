@@ -12,7 +12,7 @@
     x:DataType="vm:MainWindowViewModel">
   <ScrollViewer HorizontalScrollBarVisibility="Disabled">
     <StackPanel Margin="36,28,36,42" Spacing="18">
-      <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10">
         <StackPanel Spacing="4">
           <TextBlock Text="Library" Classes="page-title" />
           <TextBlock Text="{Binding Workspace.LibraryGameCount, StringFormat='{}{0} games on this device'}" Classes="page-subtitle" />
@@ -20,7 +20,11 @@
         <Button Grid.Column="1" Classes="primary" Content="＋ Add game" Click="OnPickGameExecutable" AutomationProperties.Name="Choose an installed game executable" />
         <Button Grid.Column="2" Content="Import Steam" Click="OnPreviewSteamImport" AutomationProperties.Name="Preview Steam library import" />
         <Button Grid.Column="3" Content="Scan folder" Click="OnScanGameFolder" AutomationProperties.Name="Choose a folder and review game executable candidates" />
+        <Button Grid.Column="4" Content="Export selected" Click="OnExportSelectedLibraryEntries" AutomationProperties.Name="Export selected library entries without secrets" />
+        <Button Grid.Column="5" Content="Import entries" Click="OnPreviewLibraryImport" AutomationProperties.Name="Preview selective library entry import" />
       </Grid>
+
+      <Border Classes="elevated-card" IsVisible="{Binding Workspace.HasLibraryImportPreview}" AutomationProperties.Name="Selective library import preview"><StackPanel Spacing="10"><Grid ColumnDefinitions="*,Auto"><StackPanel><TextBlock Text="Review library import" Classes="section-title" /><TextBlock Text="Imported records remain unapplied until you select reviewed additions or replacements. Rejected targets cannot be selected." Classes="caption" TextWrapping="Wrap" /></StackPanel><Button Grid.Column="1" Classes="primary" Content="Import checked" Click="OnCommitLibraryImport" AutomationProperties.Name="Commit checked reviewed library imports" /></Grid><ItemsControl ItemsSource="{Binding Workspace.LibraryImportItems}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="library:ReviewedLibraryImportItem"><CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding Preview.CanImport}" Margin="0,4" AutomationProperties.Name="Select reviewed library import"><Grid ColumnDefinitions="2*,Auto" ColumnSpacing="12"><StackPanel><TextBlock Text="{Binding Preview.Entry.Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding Preview.Message}" Classes="caption" TextWrapping="Wrap" /></StackPanel><TextBlock Grid.Column="1" Text="{Binding Preview.Change}" Classes="eyebrow" /></Grid></CheckBox></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
 
       <Border Classes="elevated-card" IsVisible="{Binding Workspace.HasDiscoveredGames}" AutomationProperties.Name="Reviewed folder discovery results"><StackPanel Spacing="10"><Grid ColumnDefinitions="*,Auto"><StackPanel><TextBlock Text="Folder discovery review" Classes="section-title" /><TextBlock Text="Nothing is imported until you check specific executable candidates." Classes="page-subtitle" TextWrapping="Wrap" /></StackPanel><Button Grid.Column="1" Classes="primary" Content="Import checked" Click="OnImportDiscoveredGames" AutomationProperties.Name="Import checked discovered games" /></Grid><ItemsControl ItemsSource="{Binding Workspace.DiscoveredGames}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="library:DiscoveredGameCandidate"><CheckBox IsChecked="{Binding IsSelected}" Margin="0,4" AutomationProperties.Name="Select discovered executable candidate"><StackPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding ExecutablePath}" Classes="caption" TextWrapping="Wrap" /></StackPanel></CheckBox></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
 
@@ -53,12 +57,12 @@
       </Border>
 
       <Border Classes="selection-bar" IsVisible="{Binding Workspace.HasLibraryMultiSelection}">
-        <WrapPanel ItemSpacing="8">
+        <StackPanel Spacing="8"><WrapPanel ItemSpacing="8">
           <TextBlock Text="{Binding Workspace.BulkSelectionSummary}" VerticalAlignment="Center" AutomationProperties.Name="Library selection count" />
           <Button Content="Favorite selected" Click="OnFavoriteSelectedGames" AutomationProperties.Name="Mark selected games as favorites" />
           <Button Content="Refresh selected" Click="OnRefreshSelectedGames" AutomationProperties.Name="Refresh metadata for selected games" />
           <Button Content="Clear" Click="OnClearLibrarySelection" AutomationProperties.Name="Clear selected library games" />
-        </WrapPanel>
+        </WrapPanel><TextBlock Text="Reviewed bulk edit" FontWeight="SemiBold" /><TextBlock Text="Blank fields remain unchanged. Description applies only to manual games; tags are added without removing existing tags." Classes="caption" TextWrapping="Wrap" /><WrapPanel ItemSpacing="8"><TextBox Text="{Binding Workspace.BulkTags}" Width="220" PlaceholderText="Tags to add, comma-separated" AutomationProperties.Name="Reviewed bulk tags to add" /><TextBox Text="{Binding Workspace.BulkPlatform}" Width="150" PlaceholderText="Platform (optional)" AutomationProperties.Name="Reviewed bulk platform" /><TextBox Text="{Binding Workspace.BulkDescription}" Width="280" PlaceholderText="Manual description (optional)" AutomationProperties.Name="Reviewed bulk manual description" /><Button Classes="primary" Content="Apply reviewed edits" Click="OnApplyReviewedBulkEdits" AutomationProperties.Name="Apply reviewed tags and metadata to selected games" /></WrapPanel><WrapPanel ItemSpacing="8"><ComboBox ItemsSource="{Binding Workspace.Collections}" SelectedItem="{Binding Workspace.SelectedCollection}" PlaceholderText="Destination collection" MinWidth="180" AutomationProperties.Name="Reviewed bulk destination collection"><ComboBox.ItemTemplate><DataTemplate x:DataType="domain:GameCollection"><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate></ComboBox><Button Content="Add selected to collection" Click="OnAddReviewedSelectionToCollection" AutomationProperties.Name="Add reviewed selected games to collection" /></WrapPanel></StackPanel>
       </Border>
 
       <Border Classes="empty-state" IsVisible="{Binding Workspace.IsEmpty}" AutomationProperties.Name="Empty library message">

@@ -61,6 +61,7 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("AutomationProperties.Name=\"Rescan bounded game transfer manifest\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding Workspace.GameTransferAuthorizationHint}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsEnabled=\"{Binding Workspace.CanAuthorizeGameTransfer}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"{Binding Workspace.AuthorizeGameTransferButtonText}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Trusted game transfer recipient\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Attest game copy rights\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Authorize reviewed game transfer to selected peer\"", xaml, StringComparison.Ordinal);
@@ -88,6 +89,14 @@ public sealed class MainWindowAccessibilityContractTests
         Assert.Contains("AutomationProperties.Name=\"Open Settings and Diagnostics page\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Built-in color theme\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Apply selected built-in theme\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Controller connection status\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text size (100–200%)", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Interface text scale\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Controller Home\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Controller Library\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"Controller Saves status and conflicts\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("X: context", xaml, StringComparison.Ordinal);
+        Assert.Contains("XInput and generic joystick/DirectInput-compatible controllers", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Tailscale peer IP address\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Rotate selected trusted device credential\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"Official NovaLauncher update channel\"", xaml, StringComparison.Ordinal);

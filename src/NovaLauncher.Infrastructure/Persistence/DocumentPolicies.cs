@@ -1,4 +1,5 @@
 using NovaLauncher.Application.Persistence;
+using NovaLauncher.Domain.Profiles;
 
 namespace NovaLauncher.Infrastructure.Persistence;
 
@@ -15,7 +16,7 @@ public sealed class GamesDocumentPolicy : IDocumentPolicy<GamesDocument>
             return "The games collection is required.";
         }
 
-        var ids = new HashSet<Guid>();
+        var ids = new HashSet<(Guid ProfileId, Guid GameId)>();
         var saveSyncIds = new HashSet<Guid>();
         var linkedIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var game in document.Games)
@@ -24,10 +25,12 @@ public sealed class GamesDocumentPolicy : IDocumentPolicy<GamesDocument>
             {
                 return "Every game requires a non-empty stable ID.";
             }
+            if (game.ProfileId == Guid.Empty) return "A game profile identity cannot be empty.";
 
-            if (!ids.Add(game.Id.Value))
+            var profileId = game.ProfileId ?? LocalProfileDefaults.DefaultProfileId;
+            if (!ids.Add((profileId, game.Id.Value)))
             {
-                return $"Duplicate game ID '{game.Id}'.";
+                return $"Duplicate game ID '{game.Id}' within a local profile.";
             }
 
             if (game.SaveSyncId is { } saveSyncId && (saveSyncId == Guid.Empty || !saveSyncIds.Add(saveSyncId)))
@@ -61,6 +64,22 @@ public sealed class GamesDocumentPolicy : IDocumentPolicy<GamesDocument>
                 return "A game's total playtime is outside the accepted range.";
             }
 
+            if (game.LaunchSessions is { Count: > 100 } || game.LaunchSessions?.Any(static session =>
+                session.Duration < TimeSpan.Zero || session.Duration > TimeSpan.FromDays(7) ||
+                session.EndedAtUtc < session.StartedAtUtc ||
+                session.EndedAtUtc - session.StartedAtUtc != session.Duration) == true)
+            {
+                return "Game launch history contains an invalid or excessive measured session.";
+            }
+
+            if (game.ScreenshotFolders is { Count: > 10 } || game.ScreenshotFolders?.Any(static folder =>
+                string.IsNullOrWhiteSpace(folder) || folder.Length > 1_024 || !Path.IsPathFullyQualified(folder) ||
+                folder.StartsWith("\\\\", StringComparison.Ordinal) || folder.StartsWith("\\\\?\\", StringComparison.Ordinal)) == true ||
+                game.ScreenshotFolders?.Distinct(StringComparer.OrdinalIgnoreCase).Count() != game.ScreenshotFolders?.Count)
+            {
+                return "Screenshot folders must be unique, bounded absolute local paths.";
+            }
+
             if (game.RunAsAdministrator && game.LaunchTarget.Kind != NovaLauncher.Domain.Library.LaunchTargetKind.Executable)
             {
                 return "Administrator launch is allowed only for executable targets.";
@@ -69,6 +88,18 @@ public sealed class GamesDocumentPolicy : IDocumentPolicy<GamesDocument>
             if (game.SourceItemId is { Length: > 128 } || game.ImportedName is { Length: > 500 })
             {
                 return "Game source identity or imported name exceeds its length limit.";
+            }
+
+            if (game.Notes is { Length: > 50_000 })
+            {
+                return "Game notes exceed 50,000 characters.";
+            }
+
+            if (game.Tags is { Count: > 100 } ||
+                game.Tags?.Any(static tag => string.IsNullOrWhiteSpace(tag) || tag.Length > 100) == true ||
+                game.Tags?.Distinct(StringComparer.OrdinalIgnoreCase).Count() != game.Tags?.Count)
+            {
+                return "Game tags must be unique and contain at most 100 non-empty values of 100 characters each.";
             }
 
             if (game.LinkedIdentity is { } linked &&
@@ -84,7 +115,7 @@ public sealed class GamesDocumentPolicy : IDocumentPolicy<GamesDocument>
             }
             if (game.LinkedIdentity is { } confirmed &&
                 (!string.Equals(game.Source, "Manual", StringComparison.OrdinalIgnoreCase) ||
-                 !linkedIdentities.Add($"{confirmed.ProviderId}:{confirmed.ProviderItemId}")))
+                 !linkedIdentities.Add($"{profileId:N}:{confirmed.ProviderId}:{confirmed.ProviderItemId}")))
             {
                 return "Confirmed provider identities must belong to manual games and be unique within the local library.";
             }
@@ -166,6 +197,52 @@ public sealed class GamesDocumentPolicy : IDocumentPolicy<GamesDocument>
     }
 }
 
+public sealed class GamesDocumentMigrator : IDocumentMigrator<GamesDocument>
+{
+    public GamesDocument? Migrate(GamesDocument document) => document.SchemaVersion switch
+    {
+        1 => document with { SchemaVersion = GamesDocument.CurrentSchemaVersion },
+        2 => document with { SchemaVersion = GamesDocument.CurrentSchemaVersion },
+        GamesDocument.CurrentSchemaVersion => document,
+        _ => null,
+    };
+}
+
+public sealed class ProfilesDocumentPolicy : IDocumentPolicy<ProfilesDocument>
+{
+    public string FileName => "profiles.json";
+
+    public int CurrentSchemaVersion => ProfilesDocument.CurrentSchemaVersion;
+
+    public string? Validate(ProfilesDocument document)
+    {
+        if (document.Profiles is null || document.Profiles.Count is < 1 or > 100)
+            return "Profiles must contain between 1 and 100 local profiles.";
+        if (!document.Profiles.Any(profile => profile.Id == document.ActiveProfileId))
+            return "The active profile must exist in the local profile registry.";
+        if (document.Profiles.Select(static profile => profile.Id).Distinct().Count() != document.Profiles.Count ||
+            document.Profiles.Select(static profile => profile.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != document.Profiles.Count)
+            return "Local profile identities and names must be unique.";
+        foreach (var profile in document.Profiles)
+        {
+            if (profile.Id == Guid.Empty || string.IsNullOrWhiteSpace(profile.Name) || profile.Name.Length > 100 ||
+                profile.UpdatedAtUtc < profile.CreatedAtUtc)
+                return "A local profile is invalid.";
+            if (!ValidProfilePaths(profile.DiscoveryLocations, 50) || !ValidProfilePaths(profile.IgnoredPaths, 200))
+                return "A local profile contains invalid discovery or ignored paths.";
+        }
+        if (document.Profiles.All(profile => profile.Id != LocalProfileDefaults.DefaultProfileId))
+            return "The default migration profile cannot be removed.";
+        return null;
+    }
+
+    private static bool ValidProfilePaths(IReadOnlyList<string>? paths, int maximum) =>
+        paths is null || paths.Count <= maximum &&
+        paths.Distinct(StringComparer.OrdinalIgnoreCase).Count() == paths.Count &&
+        paths.All(static path => path.Length <= 1_024 && Path.IsPathFullyQualified(path) &&
+            !path.StartsWith("\\\\", StringComparison.Ordinal) && !path.StartsWith("\\\\?\\", StringComparison.Ordinal));
+}
+
 public sealed class AchievementsDocumentPolicy : IDocumentPolicy<AchievementsDocument>
 {
     public string FileName => "achievements.json";
@@ -216,6 +293,7 @@ public sealed class CollectionsDocumentPolicy : IDocumentPolicy<CollectionsDocum
             {
                 return $"Duplicate collection ID '{collection.Id}'.";
             }
+            if (collection.ProfileId == Guid.Empty) return "A collection profile identity cannot be empty.";
 
             if (string.IsNullOrWhiteSpace(collection.Name) || collection.Name.Length > 200)
             {
@@ -258,9 +336,25 @@ public sealed class SettingsDocumentPolicy : IDocumentPolicy<SettingsDocument>
             settings.LibrarySourceFilter is not ("All sources" or "Manual" or "Steam") ||
             settings.LibraryPlatformFilter is not ("All platforms" or "Windows" or "Linux" or "macOS" or "Other") ||
             settings.LibraryAvailabilityFilter is not ("All games" or "Available" or "Missing target") ||
-            settings.UpdateChannel is not ("Stable" or "Beta" or "Alpha"))
+            settings.UpdateChannel is not ("Stable" or "Beta" or "Alpha") ||
+            settings.TextScale is < 1 or > 2 ||
+            settings.FocusScale is < 1 or > 2 ||
+            settings.ContrastPreset is not ("Standard" or "High") ||
+            settings.Culture != NovaLauncher.Application.Localization.InterfaceLocalizer.ReviewedCulture)
         {
             return "The configured Library view preferences are invalid.";
+        }
+        if (settings.ProfileViews is { Count: > 100 }) return "Too many profile-scoped view preferences are configured.";
+        foreach (var (profileId, view) in settings.ProfileViews ?? new Dictionary<string, NovaLauncher.Domain.Settings.ProfileViewSettings>())
+        {
+            if (profileId.Length != 32 || !Guid.TryParseExact(profileId, "N", out _) ||
+                view.LibraryViewMode is not ("Grid" or "List") ||
+                view.LibraryCardSize is not ("Small" or "Medium" or "Large") ||
+                view.LibrarySort is not ("Name" or "Recently played" or "Date added" or "Playtime" or "Release date" or "Platform" or "Recently updated") ||
+                view.LibrarySourceFilter is not ("All sources" or "Manual" or "Steam") ||
+                view.LibraryPlatformFilter is not ("All platforms" or "Windows" or "Linux" or "macOS" or "Other") ||
+                view.LibraryAvailabilityFilter is not ("All games" or "Available" or "Missing target"))
+                return "A profile-scoped view preference is invalid.";
         }
 
         return document.Settings.ThemeId.Length > 100
@@ -274,6 +368,7 @@ public sealed class SettingsDocumentMigrator : IDocumentMigrator<SettingsDocumen
     public SettingsDocument? Migrate(SettingsDocument document) => document.SchemaVersion switch
     {
         1 => document with { SchemaVersion = SettingsDocument.CurrentSchemaVersion, Settings = document.Settings with { UpdateChannel = "Stable" } },
+        2 => document with { SchemaVersion = SettingsDocument.CurrentSchemaVersion },
         SettingsDocument.CurrentSchemaVersion => document,
         _ => null,
     };

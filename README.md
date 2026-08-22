@@ -10,13 +10,13 @@ NovaLauncher does **not** download games or ROMs, bypass DRM, replace Steam, pro
 
 Download the latest build from [GitHub Releases](https://github.com/Lightyear4509/NovaLauncher/releases). For most users, choose:
 
-- `NovaLauncher-Setup-1.0.0-unsigned-win-x64.exe` for the Windows installer.
-- `NovaLauncher-1.0.0-unsigned-win-x64-portable.zip` if you prefer a portable copy.
+- `NovaLauncher-Setup-1.1.0-unsigned-win-x64.exe` for the Windows installer.
+- `NovaLauncher-1.1.0-unsigned-win-x64-portable.zip` if you prefer a portable copy.
 
 This release is explicitly **unsigned**. Windows cannot authenticate its publisher and may display **Unknown publisher** or a Microsoft Defender SmartScreen warning. Automatic update installation and signed rollback are unavailable in this build. Download `SHA256SUMS.txt` from the same release and verify the installer before opening it:
 
 ```powershell
-Get-FileHash .\NovaLauncher-Setup-1.0.0-unsigned-win-x64.exe -Algorithm SHA256
+Get-FileHash .\NovaLauncher-Setup-1.1.0-unsigned-win-x64.exe -Algorithm SHA256
 ```
 
 Compare the complete result with the installer entry in `SHA256SUMS.txt`. Do not run the file if the values differ, and do not disable Windows security protections globally.
@@ -195,13 +195,13 @@ NovaLauncher is local-first:
 - Pairing secrets are kept out of JSON, logs, exports, and release artifacts.
 - Online metadata and artwork requests occur only for configured supported providers.
 - Save synchronization is limited to folders you explicitly map and peers you explicitly pair.
-- Plugins, scripting, marketplaces, ROM acquisition, and general downloaded-code execution are not supported. The Phase 6 updater is narrowly limited to explicitly requested official releases and fails closed unless size, SHA-256, Authenticode trust, and an embedded publisher-certificate pin all validate; it never runs an installer automatically.
+- Plugins, scripting, marketplaces, ROM acquisition, and general downloaded-code execution are not supported. The official updater is narrowly limited to explicitly requested repository releases and fails closed unless size, SHA-256, Authenticode trust, and the embedded publisher-certificate pin all validate; it never runs an installer automatically.
 
 See [Privacy](PRIVACY.md), [Security](SECURITY.md), and [Support](SUPPORT.md) for the public policies and reporting channels.
 
 ## Current release status
 
-`v1.0.0-unsigned` is NovaLauncher's first versioned 1.0 preview. It combines the artwork-first Home and Library experience with manual and Steam discovery, additional launch actions, read-only achievements, per-game multi-peer save destinations, resumable authenticated save transfers, integrity audits, credential rotation, and bounded authorized game-folder transfer. Because this build has no publisher certificate, update installation and signed rollback fail closed and remain unavailable. This release is not production- or legal/security-qualified; signed installation lifecycle, physical multi-device and very-large transfer qualification, accessibility, antivirus, interruption recovery, and independent review remain open.
+`v1.1.0-unsigned` is the first post-1.0 feature preview. It adds local profiles, notes and tags, screenshot folders, richer launch history, selective library portability, controller input, accessibility preferences, local snapshot destinations, and fixes for large-folder authorization feedback. Because this build has no publisher certificate, update installation and signed rollback fail closed and remain unavailable. Physical multi-device, controller, display-scale, antivirus, interruption, and very-large-transfer qualification remain open.
 
 Please use test data or maintain independent backups while evaluating experimental save synchronization.
 
@@ -211,12 +211,25 @@ Remove the installed application through **Windows Settings → Apps → Install
 
 ## Contributing and development
 
-NovaLauncher is licensed under the [MIT License](LICENSE). Development documentation, architecture decisions, safety requirements, tests, and release gates remain available in this repository for contributors:
+NovaLauncher is licensed under the [MIT License](LICENSE). The public repository keeps the buildable application under `src`, automated coverage under `tests`, installer files under `installer`, and release utilities under `scripts`. Detailed product planning is maintained separately from the source repository.
 
-- [Google AI Studio Build Guide](AI/Google%20AI%20Studio%20Build%20Guide.md)
-- [Alpha Release Specification](Product/Requirements/Alpha%20Release%20Specification.md)
-- [Technical Architecture Specification](Engineering/Architecture/Technical%20Architecture%20Specification.md)
-- [Safety and Test Plan](Engineering/Quality/Safety%20and%20Test%20Plan.md)
-- [Release Readiness Checklist](Planning/Releases/Release%20Readiness%20Checklist.md)
+The application uses pinned .NET and package versions. See [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. Formatting, analyzers, Debug and Release builds, and the complete automated test suite must pass without weakening safeguards.
 
-The application uses pinned .NET and package versions. Changes should preserve its safety boundaries, pass formatting and analyzers, build in Debug and Release, and pass the complete automated test suite without weakening safeguards.
+With .NET SDK 10.0.302 installed:
+
+```powershell
+dotnet restore NovaLauncher.sln --locked-mode
+dotnet format NovaLauncher.sln --verify-no-changes --no-restore
+dotnet build NovaLauncher.sln -c Debug --no-restore
+dotnet test NovaLauncher.sln -c Debug --no-build
+dotnet build NovaLauncher.sln -c Release --no-restore
+dotnet test NovaLauncher.sln -c Release --no-build
+```
+
+To create the unsigned Windows packages, install the verified Inno Setup 7.1.0 compiler at `.tools\InnoSetup\ISCC.exe`, then run:
+
+```powershell
+.\scripts\Build-UnsignedPreview.ps1
+```
+
+The generated installer, portable ZIP, SBOM, and checksums are written to `artifacts\release` and are excluded from Git.

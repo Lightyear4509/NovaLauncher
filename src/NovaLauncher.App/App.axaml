@@ -22,6 +22,9 @@
     <SolidColorBrush x:Key="ThemeHeroScrim" Color="#B8090E1A" />
     <SolidColorBrush x:Key="ThemeCardScrim" Color="#99080D1A" />
     <x:TimeSpan x:Key="MotionDuration">0:0:0.16</x:TimeSpan>
+    <x:Double x:Key="InterfaceFontSize">14</x:Double>
+    <Thickness x:Key="FocusBorderThickness">2</Thickness>
+    <x:Boolean x:Key="ControllerHintsVisible">True</x:Boolean>
     <x:String x:Key="NavHome">⌂  _Home</x:String>
     <x:String x:Key="NavLibrary">▦  _Library</x:String>
     <x:String x:Key="NavSaves">⇅  _Saves</x:String>
@@ -33,6 +36,15 @@
       <Setter Property="Background" Value="{DynamicResource ThemeBackground}" />
       <Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
       <Setter Property="FontFamily" Value="avares://Avalonia.Fonts.Inter/Assets#Inter" />
+      <Setter Property="FontSize" Value="{DynamicResource InterfaceFontSize}" />
+    </Style>
+    <Style Selector="Button:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeAccent}" />
+      <Setter Property="BorderThickness" Value="{DynamicResource FocusBorderThickness}" />
+    </Style>
+    <Style Selector="TextBox:focus, ComboBox:focus, ListBoxItem:focus-visible, CheckBox:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeAccent}" />
+      <Setter Property="BorderThickness" Value="{DynamicResource FocusBorderThickness}" />
     </Style>
     <Style Selector="Button">
       <Setter Property="MinHeight" Value="42" />

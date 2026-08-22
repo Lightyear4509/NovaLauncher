@@ -1,5 +1,10 @@
 namespace NovaLauncher.Domain.Library;
 
+public sealed record GameLaunchSession(
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset EndedAtUtc,
+    TimeSpan Duration);
+
 public sealed record LibraryItem(
     GameId Id,
     string Name,
@@ -21,4 +26,10 @@ public sealed record LibraryItem(
     string? SaveSyncLabel = null,
     LinkedGameIdentity? LinkedIdentity = null,
     IReadOnlyList<Guid>? SaveSyncPeerIds = null,
-    IReadOnlyList<GameLaunchAction>? LaunchActions = null);
+    IReadOnlyList<GameLaunchAction>? LaunchActions = null,
+    string? Notes = null,
+    IReadOnlyList<string>? Tags = null,
+    IReadOnlyList<GameLaunchSession>? LaunchSessions = null,
+    IReadOnlyList<string>? ScreenshotFolders = null,
+    Guid? ProfileId = null,
+    bool HiddenFromSharedScreen = false);

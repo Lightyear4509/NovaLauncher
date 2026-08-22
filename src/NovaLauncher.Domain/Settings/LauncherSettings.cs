@@ -1,5 +1,17 @@
 namespace NovaLauncher.Domain.Settings;
 
+public sealed record ProfileViewSettings(
+    string LibraryViewMode,
+    string LibraryCardSize,
+    string LibrarySort,
+    string LibrarySourceFilter,
+    string LibraryPlatformFilter,
+    string LibraryAvailabilityFilter,
+    bool LibraryFavoritesOnly,
+    string HomeSectionOrder,
+    string HomeHiddenSections,
+    bool SharedScreenMode = false);
+
 public sealed record LauncherSettings(
     string ThemeId,
     bool ReduceMotion,
@@ -15,7 +27,15 @@ public sealed record LauncherSettings(
     string UpdateChannel = "Stable",
     string HomeSectionOrder = "Highlights,RecentlyPlayed,MostPlayed",
     string HomeHiddenSections = "",
-    bool ControllerMode = false)
+    bool ControllerMode = false,
+    IReadOnlyDictionary<string, ProfileViewSettings>? ProfileViews = null,
+    bool StartWithWindows = false,
+    bool MinimizeToTray = false,
+    double TextScale = 1,
+    double FocusScale = 1,
+    string ContrastPreset = "Standard",
+    bool ShowControllerHints = true,
+    string Culture = "en-US")
 {
     public static LauncherSettings Default { get; } = new(
         "nova-dark",

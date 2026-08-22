@@ -9,7 +9,7 @@ content.
 
 NovaLauncher never needs Steam credentials and must never modify Steam files.
 The current build has no telemetry, plugin execution, hosted NovaLauncher
-cloud, or ROM acquisition. The Phase 6 updater is a narrow exception to the
+cloud, or ROM acquisition. The official updater is a narrow exception to the
 downloaded-code prohibition: it checks only this official repository after an
 explicit user action and refuses to stage an installer unless its size,
 SHA-256, Windows Authenticode chain, and embedded publisher-certificate pin all

@@ -2,6 +2,7 @@ using NovaLauncher.Application.Persistence;
 using NovaLauncher.Domain.Library;
 using NovaLauncher.Domain.Settings;
 using NovaLauncher.Domain.SaveSync;
+using NovaLauncher.Domain.Profiles;
 using NovaLauncher.Infrastructure.Persistence;
 
 namespace NovaLauncher.Infrastructure.Tests;
@@ -185,6 +186,67 @@ public sealed class DocumentPolicyTests
     }
 
     [Fact]
+    public void GamesPolicyBoundsNotesAndTags()
+    {
+        var policy = new GamesDocumentPolicy();
+        var game = ValidGame();
+
+        Assert.Null(policy.Validate(new GamesDocument(GamesDocument.CurrentSchemaVersion, [game with
+        {
+            Notes = "Local only",
+            Tags = ["Co-op", "Deck"],
+        }])));
+        Assert.Contains("notes", policy.Validate(new GamesDocument(GamesDocument.CurrentSchemaVersion, [game with
+        {
+            Notes = new string('n', 50_001),
+        }])), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("tags", policy.Validate(new GamesDocument(GamesDocument.CurrentSchemaVersion, [game with
+        {
+            Tags = ["Co-op", "co-op"],
+        }])), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GamesPolicyBoundsMeasuredLaunchHistory()
+    {
+        var game = ValidGame();
+        var validSession = new GameLaunchSession(Now, Now.AddMinutes(5), TimeSpan.FromMinutes(5));
+
+        Assert.Null(new GamesDocumentPolicy().Validate(new GamesDocument(GamesDocument.CurrentSchemaVersion, [game with
+        {
+            LaunchSessions = [validSession],
+        }])));
+        Assert.Contains("launch history", new GamesDocumentPolicy().Validate(new GamesDocument(GamesDocument.CurrentSchemaVersion, [game with
+        {
+            LaunchSessions = [validSession with { Duration = TimeSpan.FromMinutes(6) }],
+        }])), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GamesPolicyRejectsUnsafeScreenshotFolders()
+    {
+        var game = ValidGame();
+        var error = new GamesDocumentPolicy().Validate(new GamesDocument(GamesDocument.CurrentSchemaVersion, [game with
+        {
+            ScreenshotFolders = ["\\\\server\\screens"],
+        }]));
+
+        Assert.Contains("Screenshot folders", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GamesMigratorUpgradesVersionOneWithoutChangingEntries()
+    {
+        var game = ValidGame();
+
+        var migrated = new GamesDocumentMigrator().Migrate(new GamesDocument(1, [game]));
+
+        Assert.NotNull(migrated);
+        Assert.Equal(GamesDocument.CurrentSchemaVersion, migrated.SchemaVersion);
+        Assert.Equal(game, Assert.Single(migrated.Games));
+    }
+
+    [Fact]
     public void CollectionsPolicyRejectsMissingDuplicateAndInvalidMembership()
     {
         var policy = new CollectionsDocumentPolicy();
@@ -220,6 +282,24 @@ public sealed class DocumentPolicyTests
             policy.Validate(new SettingsDocument(1, LauncherSettings.Default with { LibraryViewMode = "downloaded-view" })),
             StringComparison.OrdinalIgnoreCase);
         Assert.Null(policy.Validate(SettingsDocument.Default));
+    }
+
+    [Fact]
+    public void ProfilesPolicyRequiresDefaultActiveAndUniqueBoundedProfiles()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var valid = ProfilesDocument.CreateDefault(now);
+        var policy = new ProfilesDocumentPolicy();
+
+        Assert.Null(policy.Validate(valid));
+        Assert.Contains("active profile", policy.Validate(valid with { ActiveProfileId = Guid.NewGuid() }), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("unique", policy.Validate(valid with { Profiles = [valid.Profiles[0], valid.Profiles[0]] }), StringComparison.OrdinalIgnoreCase);
+        var otherId = Guid.NewGuid();
+        Assert.Contains("default", policy.Validate(valid with
+        {
+            ActiveProfileId = otherId,
+            Profiles = [new LocalProfile(otherId, "Other", now, now)],
+        }), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

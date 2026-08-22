@@ -2,6 +2,7 @@ using NovaLauncher.Domain.Library;
 using NovaLauncher.Domain.Settings;
 using NovaLauncher.Domain.Achievements;
 using NovaLauncher.Domain.SaveSync;
+using NovaLauncher.Domain.Profiles;
 
 namespace NovaLauncher.Application.Persistence;
 
@@ -9,7 +10,7 @@ public sealed record GamesDocument(
     int SchemaVersion,
     IReadOnlyList<LibraryItem> Games) : IVersionedDocument
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 3;
 
     public static GamesDocument Empty { get; } = new(CurrentSchemaVersion, []);
 }
@@ -27,7 +28,7 @@ public sealed record SettingsDocument(
     int SchemaVersion,
     LauncherSettings Settings) : IVersionedDocument
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public static SettingsDocument Default { get; } = new(CurrentSchemaVersion, LauncherSettings.Default);
 }
@@ -51,4 +52,17 @@ public sealed record SaveSyncDocument(
     public const int CurrentSchemaVersion = 1;
 
     public static SaveSyncDocument CreateDefault() => new(CurrentSchemaVersion, SaveSyncSettings.CreateDefault());
+}
+
+public sealed record ProfilesDocument(
+    int SchemaVersion,
+    Guid ActiveProfileId,
+    IReadOnlyList<LocalProfile> Profiles) : IVersionedDocument
+{
+    public const int CurrentSchemaVersion = 1;
+
+    public static ProfilesDocument CreateDefault(DateTimeOffset now) => new(
+        CurrentSchemaVersion,
+        LocalProfileDefaults.DefaultProfileId,
+        [new LocalProfile(LocalProfileDefaults.DefaultProfileId, "Default", now, now)]);
 }

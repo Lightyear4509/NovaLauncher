@@ -1,5 +1,6 @@
 using NovaLauncher.Application.Persistence;
 using NovaLauncher.Domain.Library;
+using NovaLauncher.Domain.Profiles;
 
 namespace NovaLauncher.Application.Library;
 
@@ -7,6 +8,8 @@ public sealed class CollectionCoordinator(IDocumentStore<CollectionsDocument> st
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private GameCollection[] _collections = [];
+    private GameCollection[] _allCollections = [];
+    private Guid _activeProfileId = LocalProfileDefaults.DefaultProfileId;
 
     public IReadOnlyList<GameCollection> Collections => _collections;
 
@@ -15,8 +18,16 @@ public sealed class CollectionCoordinator(IDocumentStore<CollectionsDocument> st
     public async Task<DocumentLoadResult<CollectionsDocument>> LoadAsync(CancellationToken cancellationToken)
     {
         var result = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
-        _collections = result.Document?.Collections.ToArray() ?? [];
+        _allCollections = result.Document?.Collections.ToArray() ?? [];
+        RefreshActiveCollections();
         return result;
+    }
+
+    public void SetActiveProfile(Guid profileId)
+    {
+        if (profileId == Guid.Empty) throw new ArgumentException("The active profile ID cannot be empty.", nameof(profileId));
+        _activeProfileId = profileId;
+        RefreshActiveCollections();
     }
 
     public async Task<DocumentSaveResult> CreateAsync(string name, CancellationToken cancellationToken)
@@ -29,7 +40,7 @@ public sealed class CollectionCoordinator(IDocumentStore<CollectionsDocument> st
         return await MutateAsync(current =>
         {
             var now = timeProvider.GetUtcNow();
-            return current.Append(new GameCollection(GameCollectionId.New(), name.Trim(), [], now, now)).ToArray();
+            return current.Append(new GameCollection(GameCollectionId.New(), name.Trim(), [], now, now, _activeProfileId)).ToArray();
         }, cancellationToken).ConfigureAwait(false);
     }
 
@@ -67,6 +78,23 @@ public sealed class CollectionCoordinator(IDocumentStore<CollectionsDocument> st
 
             return collection with { GameIds = ids, UpdatedAtUtc = timeProvider.GetUtcNow() };
         }, cancellationToken);
+
+    public Task<DocumentSaveResult> SetMembershipsAsync(
+        GameCollectionId id,
+        IReadOnlyCollection<GameId> gameIds,
+        bool isMember,
+        CancellationToken cancellationToken)
+    {
+        var changedIds = gameIds.Distinct().ToHashSet();
+        if (changedIds.Count is 0 or > 10_000)
+            return Task.FromResult(new DocumentSaveResult(DocumentSaveStatus.Failed, "Select between 1 and 10,000 games."));
+        return UpdateAsync(id, collection =>
+        {
+            var ids = collection.GameIds.Where(existing => !changedIds.Contains(existing)).ToList();
+            if (isMember) ids.AddRange(changedIds);
+            return collection with { GameIds = ids, UpdatedAtUtc = timeProvider.GetUtcNow() };
+        }, cancellationToken);
+    }
 
     public Task<DocumentSaveResult> ReplaceGameReferenceAsync(
         GameId duplicateId,
@@ -111,12 +139,14 @@ public sealed class CollectionCoordinator(IDocumentStore<CollectionsDocument> st
                 return new DocumentSaveResult(DocumentSaveStatus.Failed, "Collection not found.");
             }
 
+            var allStaged = _allCollections.Where(collection => EffectiveProfileId(collection) != _activeProfileId).Concat(staged).ToArray();
             var result = await store.SaveAsync(
-                new CollectionsDocument(CollectionsDocument.CurrentSchemaVersion, staged),
+                new CollectionsDocument(CollectionsDocument.CurrentSchemaVersion, allStaged),
                 cancellationToken).ConfigureAwait(false);
             if (result.Status == DocumentSaveStatus.Saved)
             {
                 _collections = staged;
+                _allCollections = allStaged;
             }
 
             return result;
@@ -126,4 +156,10 @@ public sealed class CollectionCoordinator(IDocumentStore<CollectionsDocument> st
             _gate.Release();
         }
     }
+
+    private void RefreshActiveCollections() => _collections = _allCollections
+        .Where(collection => EffectiveProfileId(collection) == _activeProfileId)
+        .ToArray();
+
+    private static Guid EffectiveProfileId(GameCollection collection) => collection.ProfileId ?? LocalProfileDefaults.DefaultProfileId;
 }

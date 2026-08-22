@@ -19,6 +19,8 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
     private readonly Dictionary<Guid, AuthorizedGameTransfer> _offers = [];
     private readonly string _auditPath = Path.Combine(dataRoot, "GameTransfers", "audit.json");
 
+    public event Action<GameTransferScanProgress>? ScanProgressChanged;
+
     public void AttachEndpoint() => transport.AttachGameTransferEndpoint(this);
 
     public async Task<GameTransferPreview> PreviewAsync(LibraryItem game, string sourceFolder, CancellationToken cancellationToken)
@@ -30,9 +32,13 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { return Reject(game.Name, sourceFolder, exception.Message); }
         if (!Directory.Exists(root)) return Reject(game.Name, root, "The selected source folder does not exist.");
         if (IsManagedStoreRoot(root)) return Reject(game.Name, root, "Steam and other store-managed installation roots are excluded.");
-        var executable = Path.GetFullPath(game.LaunchTarget.Target);
+        string executable;
+        try { executable = Path.GetFullPath(game.LaunchTarget.Target); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        { return Reject(game.Name, root, $"The saved executable path is invalid ({exception.GetType().Name})."); }
         if (!executable.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return Reject(game.Name, root, "The selected folder must contain the manual game executable.");
         var files = new List<GameTransferFile>();
+        var candidates = new List<(string Path, string RelativePath, long Length, DateTime LastWriteTimeUtc)>();
         long total = 0;
         try
         {
@@ -41,33 +47,48 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
             pendingDirectories.Push(root);
             while (pendingDirectories.Count > 0)
             {
-                foreach (var directory in Directory.EnumerateDirectories(pendingDirectories.Pop()))
+                var current = pendingDirectories.Pop();
+                foreach (var directory in Directory.EnumerateDirectories(current))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if ((new DirectoryInfo(directory).Attributes & FileAttributes.ReparsePoint) != 0)
                         return Reject(game.Name, root, "Reparse-point directories inside a transfer source are not allowed.");
                     pendingDirectories.Push(directory);
                 }
+                foreach (var path in Directory.EnumerateFiles(current))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (candidates.Count >= MaximumFiles) return Reject(game.Name, root, $"The package exceeds the {MaximumFiles:N0}-file limit.");
+                    var info = new FileInfo(path);
+                    if ((info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.SparseFile | FileAttributes.Device)) != 0) return Reject(game.Name, root, $"Unsafe file attributes were detected for {info.Name}.");
+                    var relative = NormalizeRelativePath(Path.GetRelativePath(root, path));
+                    if (!IsSafeRelativePath(relative) || !IsFileSizeWithinLimit(info.Length)) return Reject(game.Name, root, $"Unsafe or oversized package file: {relative}.");
+                    total = checked(total + info.Length);
+                    if (!IsPackageSizeWithinLimit(total)) return Reject(game.Name, root, "The package exceeds the 700 GiB aggregate size limit.");
+                    candidates.Add((path, relative, info.Length, info.LastWriteTimeUtc));
+                }
             }
-            foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+
+            long completedBytes = 0;
+            for (var index = 0; index < candidates.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (files.Count >= MaximumFiles) return Reject(game.Name, root, $"The package exceeds the {MaximumFiles:N0}-file limit.");
-                var info = new FileInfo(path);
-                if ((info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.SparseFile | FileAttributes.Device)) != 0) return Reject(game.Name, root, $"Unsafe file attributes were detected for {info.Name}.");
-                var relative = NormalizeRelativePath(Path.GetRelativePath(root, path));
-                if (!IsSafeRelativePath(relative) || !IsFileSizeWithinLimit(info.Length)) return Reject(game.Name, root, $"Unsafe or oversized package file: {relative}.");
-                total = checked(total + info.Length);
-                if (!IsPackageSizeWithinLimit(total)) return Reject(game.Name, root, "The package exceeds the 700 GiB aggregate size limit.");
-                var beforeLength = info.Length;
-                var beforeWrite = info.LastWriteTimeUtc;
-                var hash = await HashFileAsync(path, cancellationToken).ConfigureAwait(false);
+                var candidate = candidates[index];
+                ScanProgressChanged?.Invoke(new(candidate.RelativePath, index, candidates.Count, completedBytes, total));
+                var info = new FileInfo(candidate.Path);
+                if (!info.Exists || info.Length != candidate.Length || info.LastWriteTimeUtc != candidate.LastWriteTimeUtc)
+                    return Reject(game.Name, root, $"{candidate.RelativePath} changed before hashing. Close the game and retry.");
+                var hash = await HashFileAsync(candidate.Path, cancellationToken).ConfigureAwait(false);
                 info.Refresh();
-                if (info.Length != beforeLength || info.LastWriteTimeUtc != beforeWrite) return Reject(game.Name, root, $"{relative} changed during scanning. Close the game and retry.");
-                files.Add(new(relative, beforeLength, hash, beforeWrite));
+                if (info.Length != candidate.Length || info.LastWriteTimeUtc != candidate.LastWriteTimeUtc)
+                    return Reject(game.Name, root, $"{candidate.RelativePath} changed during hashing. Close the game and retry.");
+                files.Add(new(candidate.RelativePath, candidate.Length, hash, candidate.LastWriteTimeUtc));
+                completedBytes = checked(completedBytes + candidate.Length);
+                ScanProgressChanged?.Invoke(new(candidate.RelativePath, index + 1, candidates.Count, completedBytes, total));
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or OverflowException) { return Reject(game.Name, root, exception.Message); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or OverflowException or CryptographicException)
+        { return Reject(game.Name, root, $"Folder scan failed ({exception.GetType().Name}): {exception.Message}"); }
         if (files.Count == 0) return Reject(game.Name, root, "The selected folder is empty.");
         if (!files.Any(file => string.Equals(Path.GetFullPath(Path.Combine(root, file.RelativePath)), executable, StringComparison.OrdinalIgnoreCase))) return Reject(game.Name, root, "The game executable was not included in the manifest.");
         return new(true, game.Name, root, files.OrderBy(static file => file.RelativePath, StringComparer.OrdinalIgnoreCase).ToArray(), [], total, null);

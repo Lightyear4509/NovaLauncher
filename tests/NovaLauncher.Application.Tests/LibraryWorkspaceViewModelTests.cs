@@ -347,6 +347,72 @@ public sealed class LibraryWorkspaceViewModelTests
     }
 
     [Fact]
+    public async Task ControllerModeStartsOnHomeAndRestoresPriorPageAndHistoryOnExit()
+    {
+        using var fixture = new WorkspaceFixture();
+        fixture.Workspace.NavigateTo("Library");
+        fixture.Workspace.NavigateTo("Settings");
+
+        await fixture.Workspace.SetControllerModeAsync(true, CancellationToken.None);
+
+        Assert.True(fixture.Workspace.IsControllerMode);
+        Assert.True(fixture.Workspace.IsHomePage);
+        Assert.False(fixture.Workspace.CanNavigateBack);
+        await fixture.Workspace.SetControllerModeAsync(false, CancellationToken.None);
+        Assert.True(fixture.Workspace.IsSettingsPage);
+        Assert.True(fixture.Workspace.CanNavigateBack);
+        fixture.Workspace.NavigateBack();
+        Assert.True(fixture.Workspace.IsLibraryPage);
+    }
+
+    [Fact]
+    public async Task TagsBecomeSearchableSmartCollections()
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.Workspace.InitializeAsync(CancellationToken.None);
+        foreach (var (name, tags) in new[] { ("Together", "Co-op, Relaxed"), ("Solo", "Challenging") })
+        {
+            fixture.Workspace.BeginAdd();
+            fixture.Workspace.Name = name;
+            fixture.Workspace.Platform = "Windows";
+            fixture.Workspace.Target = $"C:\\Games\\{name}.exe";
+            await fixture.Workspace.SaveDraftAsync(CancellationToken.None);
+            fixture.Workspace.PersonalTags = tags;
+            await fixture.Workspace.SavePersonalWorkspaceAsync(CancellationToken.None);
+        }
+
+        Assert.Contains("Tag: Co-op", fixture.Workspace.SmartCollectionOptions);
+        fixture.Workspace.SmartCollectionFilter = "Tag: Co-op";
+        Assert.Equal("Together", Assert.Single(fixture.Workspace.Games).Name);
+        fixture.Workspace.ClearSmartCollectionFilter();
+        fixture.Workspace.SearchText = "relax";
+        Assert.Equal("Together", Assert.Single(fixture.Workspace.Games).Name);
+    }
+
+    [Fact]
+    public async Task SharedScreenModeHidesMarkedGamesAcrossBrowsingAndStatistics()
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.Workspace.InitializeAsync(CancellationToken.None);
+        fixture.Workspace.Name = "Private game";
+        fixture.Workspace.Platform = "Windows";
+        fixture.Workspace.Target = "C:\\Games\\Private.exe";
+        await fixture.Workspace.SaveDraftAsync(CancellationToken.None);
+        await fixture.Workspace.ToggleSelectedSharedScreenVisibilityAsync(CancellationToken.None);
+
+        Assert.True(fixture.Workspace.HideSelectedFromSharedScreen);
+        fixture.Workspace.SharedScreenMode = true;
+
+        Assert.Empty(fixture.Workspace.Games);
+        Assert.Empty(fixture.Workspace.HomeGames);
+        Assert.Null(fixture.Workspace.FeaturedGame);
+        Assert.Equal(0, fixture.Workspace.LibraryGameCount);
+        Assert.Null(fixture.Workspace.SelectedGame);
+        fixture.Workspace.SharedScreenMode = false;
+        Assert.Equal("Private game", Assert.Single(fixture.Workspace.Games).Name);
+    }
+
+    [Fact]
     public async Task DuplicateReviewFindsSameExecutableWithoutMutatingLibrary()
     {
         using var fixture = new WorkspaceFixture();

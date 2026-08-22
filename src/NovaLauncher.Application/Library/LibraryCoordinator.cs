@@ -2,6 +2,7 @@ using NovaLauncher.Application.Persistence;
 using NovaLauncher.Application.Steam;
 using NovaLauncher.Domain.Library;
 using NovaLauncher.Domain.SaveSync;
+using NovaLauncher.Domain.Profiles;
 
 namespace NovaLauncher.Application.Library;
 
@@ -17,6 +18,11 @@ public sealed record LibraryMutationResult(
     LibraryItem? Item,
     IReadOnlyDictionary<string, string> Errors,
     string? Error);
+
+public sealed record BulkLibraryEditDraft(
+    IReadOnlyList<string>? AddTags,
+    string? Platform,
+    string? ManualDescription);
 
 public sealed record DuplicateMergePreview(LibraryItem Survivor, LibraryItem Duplicate, LibraryItem? Merged, string? Error)
 {
@@ -46,9 +52,13 @@ public sealed class LibraryCoordinator(
 {
     private readonly SemaphoreSlim _mutationGate = new(1, 1);
     private LibraryItem[] _games = [];
+    private LibraryItem[] _allGames = [];
+    private Guid _activeProfileId = LocalProfileDefaults.DefaultProfileId;
     private long _revision;
 
     public IReadOnlyList<LibraryItem> Games => _games;
+
+    public long Revision => Interlocked.Read(ref _revision);
 
     public LibraryLoadState LoadState { get; private set; }
 
@@ -61,7 +71,8 @@ public sealed class LibraryCoordinator(
         var result = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
         if (result.Document is not null)
         {
-            _games = result.Document.Games.ToArray();
+            _allGames = result.Document.Games.ToArray();
+            RefreshActiveGames();
             _revision++;
         }
 
@@ -76,6 +87,15 @@ public sealed class LibraryCoordinator(
         };
 
         return result;
+    }
+
+    public void SetActiveProfile(Guid profileId)
+    {
+        if (profileId == Guid.Empty) throw new ArgumentException("The active profile ID cannot be empty.", nameof(profileId));
+        _activeProfileId = profileId;
+        RefreshActiveGames();
+        _revision++;
+        LoadState = _games.Length == 0 ? LibraryLoadState.Empty : LibraryLoadState.Ready;
     }
 
     public async Task<LibraryMutationResult> EditManualGameAsync(
@@ -117,6 +137,141 @@ public sealed class LibraryCoordinator(
     public Task<LibraryMutationResult> RemoveAsync(GameId gameId, CancellationToken cancellationToken) =>
         MutateExistingAsync(gameId, item: null, cancellationToken);
 
+    public async Task<LibraryMutationResult> SetNotesAndTagsAsync(
+        GameId gameId,
+        string? notes,
+        IReadOnlyList<string>? tags,
+        CancellationToken cancellationToken)
+    {
+        var normalizedNotes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        if (normalizedNotes is { Length: > 50_000 })
+            return PersistenceFailure("Game notes cannot exceed 50,000 characters.");
+
+        var normalizedTags = (tags ?? [])
+            .Select(static tag => tag.Trim())
+            .Where(static tag => tag.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (normalizedTags.Length > 100 || normalizedTags.Any(static tag => tag.Length > 100))
+            return PersistenceFailure("Use at most 100 tags of 100 characters each.");
+
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var index = FindIndex(gameId);
+            if (index < 0) return PersistenceFailure("The selected game no longer exists.");
+            var updated = _games[index] with
+            {
+                Notes = normalizedNotes,
+                Tags = normalizedTags.Length == 0 ? null : normalizedTags,
+                UpdatedAtUtc = timeProvider.GetUtcNow(),
+            };
+            return await SaveReplacementAsync(index, updated, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _mutationGate.Release();
+        }
+    }
+
+    public async Task<LibraryMutationResult> SetScreenshotFoldersAsync(
+        GameId gameId,
+        IReadOnlyList<string>? folders,
+        CancellationToken cancellationToken)
+    {
+        var normalized = new List<string>();
+        foreach (var folder in folders ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(folder) || !Path.IsPathFullyQualified(folder) || !Directory.Exists(folder))
+                return PersistenceFailure("Choose existing absolute local screenshot folders.");
+            var path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+            if (path.StartsWith("\\\\", StringComparison.Ordinal) || path.StartsWith("\\\\?\\", StringComparison.Ordinal))
+                return PersistenceFailure("Network and device paths cannot be used as screenshot folders.");
+            if (!normalized.Contains(path, StringComparer.OrdinalIgnoreCase)) normalized.Add(path);
+        }
+        if (normalized.Count > 10) return PersistenceFailure("A game can use at most 10 screenshot folders.");
+
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var index = FindIndex(gameId);
+            if (index < 0) return PersistenceFailure("The selected game no longer exists.");
+            var updated = _games[index] with
+            {
+                ScreenshotFolders = normalized.Count == 0 ? null : normalized,
+                UpdatedAtUtc = timeProvider.GetUtcNow(),
+            };
+            return await SaveReplacementAsync(index, updated, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _mutationGate.Release(); }
+    }
+
+    public Task<LibraryMutationResult> SetHiddenFromSharedScreenAsync(
+        GameId gameId,
+        bool hidden,
+        CancellationToken cancellationToken)
+    {
+        var existing = _games.FirstOrDefault(game => game.Id == gameId);
+        return existing is null
+            ? Task.FromResult(PersistenceFailure("The selected game no longer exists."))
+            : MutateExistingAsync(
+                gameId,
+                existing with { HiddenFromSharedScreen = hidden, UpdatedAtUtc = timeProvider.GetUtcNow() },
+                cancellationToken);
+    }
+
+    public async Task<LibraryTransferResult> BulkEditAsync(
+        IReadOnlyCollection<GameId> gameIds,
+        BulkLibraryEditDraft draft,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(gameIds);
+        ArgumentNullException.ThrowIfNull(draft);
+        var ids = gameIds.ToHashSet();
+        if (ids.Count is 0 or > 10_000) return new(false, 0, "Select between 1 and 10,000 games for bulk editing.");
+        var tags = (draft.AddTags ?? []).Select(static tag => tag.Trim()).Where(static tag => tag.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (tags.Length > 100 || tags.Any(static tag => tag.Length > 100)) return new(false, 0, "Bulk tags exceed supported bounds.");
+        var platform = string.IsNullOrWhiteSpace(draft.Platform) ? null : draft.Platform.Trim();
+        var description = string.IsNullOrWhiteSpace(draft.ManualDescription) ? null : draft.ManualDescription.Trim();
+        if (platform is { Length: > 100 } || description is { Length: > 10_000 }) return new(false, 0, "Bulk metadata exceeds supported bounds.");
+
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (ids.Any(id => _games.All(game => game.Id != id))) return new(false, 0, "The library changed. Review the bulk selection again.");
+            if (_games.Where(game => ids.Contains(game.Id)).Any(game => (game.Tags ?? []).Concat(tags).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 100))
+                return new(false, 0, "Combined tags would exceed 100 tags on at least one game.");
+            var now = timeProvider.GetUtcNow();
+            var staged = _games.Select(game =>
+            {
+                if (!ids.Contains(game.Id)) return game;
+                var mergedTags = (game.Tags ?? []).Concat(tags).Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Order(StringComparer.OrdinalIgnoreCase).ToArray();
+                var metadata = game.Metadata;
+                if (description is not null && string.Equals(game.Source, "Manual", StringComparison.OrdinalIgnoreCase))
+                {
+                    var provenance = new MetadataProvenance("Manual", null, now, IsManual: true);
+                    metadata = metadata with { Description = new MetadataValue<string>(description, provenance) };
+                }
+                return game with
+                {
+                    Tags = mergedTags.Length == 0 ? null : mergedTags,
+                    Platform = platform ?? game.Platform,
+                    Metadata = metadata,
+                    UpdatedAtUtc = now,
+                };
+            }).ToArray();
+            var save = await store.SaveAsync(CreateActiveDocument(staged), cancellationToken).ConfigureAwait(false);
+            if (save.Status != DocumentSaveStatus.Saved) return new(false, 0, save.Error ?? "Bulk edits could not be saved.");
+            PublishActive(staged);
+            _revision++;
+            return new(true, ids.Count, $"Applied reviewed bulk edits to {ids.Count} game or games.");
+        }
+        finally { _mutationGate.Release(); }
+    }
+
     public DuplicateMergePreview PreviewDuplicateMerge(GameId survivorId, GameId duplicateId)
     {
         var survivor = _games.FirstOrDefault(game => game.Id == survivorId);
@@ -149,6 +304,12 @@ public sealed class LibraryCoordinator(
             SaveSyncId = survivor.SaveSyncId ?? duplicate.SaveSyncId,
             SaveSyncLabel = survivor.SaveSyncLabel ?? duplicate.SaveSyncLabel,
             LinkedIdentity = survivor.LinkedIdentity ?? duplicate.LinkedIdentity,
+            LaunchSessions = (survivor.LaunchSessions ?? [])
+                .Concat(duplicate.LaunchSessions ?? [])
+                .Distinct()
+                .OrderByDescending(static session => session.StartedAtUtc)
+                .Take(100)
+                .ToArray(),
         };
         return new(survivor, duplicate, merged, null);
     }
@@ -172,9 +333,9 @@ public sealed class LibraryCoordinator(
             var staged = _games.Where(game => game.Id != preview.Duplicate.Id).ToList();
             var stagedSurvivorIndex = staged.FindIndex(game => game.Id == preview.Survivor.Id);
             staged[stagedSurvivorIndex] = preview.Merged!;
-            var save = await store.SaveAsync(new GamesDocument(GamesDocument.CurrentSchemaVersion, staged), cancellationToken).ConfigureAwait(false);
+            var save = await store.SaveAsync(CreateActiveDocument(staged), cancellationToken).ConfigureAwait(false);
             if (save.Status != DocumentSaveStatus.Saved) return PersistenceFailure(save.Error);
-            _games = staged.ToArray();
+            PublishActive(staged);
             _revision++;
             return Success(preview.Merged!);
         }
@@ -510,6 +671,11 @@ public sealed class LibraryCoordinator(
             {
                 TotalPlayTime = existing.TotalPlayTime + elapsed,
                 LastPlayedAtUtc = launchedAtUtc,
+                LaunchSessions = (existing.LaunchSessions ?? [])
+                    .Prepend(new GameLaunchSession(launchedAtUtc, launchedAtUtc + elapsed, elapsed))
+                    .OrderByDescending(static session => session.StartedAtUtc)
+                    .Take(100)
+                    .ToArray(),
                 UpdatedAtUtc = timeProvider.GetUtcNow(),
             },
             cancellationToken).ConfigureAwait(false);
@@ -623,7 +789,7 @@ public sealed class LibraryCoordinator(
 
                 if (index < 0)
                 {
-                    staged.Add(CreateSteamGame(candidate, now));
+                    staged.Add(CreateSteamGame(candidate, now, _activeProfileId));
                     indexBySourceId[sourceId] = staged.Count - 1;
                     indexById[GameId.FromSteamAppId(candidate.AppId)] = staged.Count - 1;
                     continue;
@@ -646,14 +812,14 @@ public sealed class LibraryCoordinator(
             }
 
             var save = await store.SaveAsync(
-                new GamesDocument(GamesDocument.CurrentSchemaVersion, staged),
+                CreateActiveDocument(staged),
                 cancellationToken).ConfigureAwait(false);
             if (save.Status != DocumentSaveStatus.Saved)
             {
                 return new SteamImportCommitResult(SteamImportCommitStatus.PersistenceFailed, 0, save.Error);
             }
 
-            _games = staged.ToArray();
+            PublishActive(staged);
             _revision++;
             return new SteamImportCommitResult(
                 SteamImportCommitStatus.Saved,
@@ -664,6 +830,60 @@ public sealed class LibraryCoordinator(
         {
             _mutationGate.Release();
         }
+    }
+
+    public async Task<LibraryTransferResult> CommitPortableImportAsync(
+        LibraryImportPreview preview,
+        IReadOnlySet<int> acceptedIndexes,
+        CancellationToken cancellationToken)
+    {
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (preview.LibraryRevision != _revision)
+                return new(false, 0, "The library changed after preview. Preview the import again.");
+            var staged = _games.ToList();
+            var imported = 0;
+            foreach (var item in preview.Items.Where(item => acceptedIndexes.Contains(item.Index)).OrderBy(static item => item.Index))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!item.CanImport || item.Candidate is null)
+                    return new(false, 0, "The import selection contains an unreviewed or rejected entry.");
+                if (item.Change == LibraryTransferChange.Replace && item.ExistingGameId is { } existingId)
+                {
+                    var index = staged.FindIndex(game => game.Id == existingId);
+                    if (index < 0) return new(false, 0, "A matching library entry changed after preview.");
+                    var existing = staged[index];
+                    staged[index] = existing with
+                    {
+                        Name = item.Candidate.Name,
+                        Platform = item.Candidate.Platform,
+                        Source = item.Candidate.Source,
+                        LaunchTarget = item.Candidate.LaunchTarget,
+                        IsFavorite = item.Candidate.IsFavorite,
+                        SourceItemId = item.Candidate.SourceItemId,
+                        ImportedName = item.Candidate.ImportedName,
+                        Notes = item.Candidate.Notes,
+                        Tags = item.Candidate.Tags,
+                        UpdatedAtUtc = timeProvider.GetUtcNow(),
+                    };
+                }
+                else
+                {
+                    var candidate = item.Candidate with { ProfileId = _activeProfileId };
+                    if (_allGames.Any(game => EffectiveProfileId(game) == _activeProfileId && game.Id == candidate.Id))
+                        candidate = candidate with { Id = GameId.New() };
+                    staged.Add(candidate);
+                }
+                imported++;
+            }
+            var save = await store.SaveAsync(CreateActiveDocument(staged), cancellationToken).ConfigureAwait(false);
+            if (save.Status != DocumentSaveStatus.Saved) return new(false, 0, save.Error ?? "The imported library could not be saved.");
+            PublishActive(staged);
+            _revision++;
+            return new(true, imported, $"Imported {imported} reviewed library entry or entries.");
+        }
+        finally { _mutationGate.Release(); }
     }
 
     public async Task<LibraryMutationResult> AddManualGameAsync(
@@ -693,10 +913,11 @@ public sealed class LibraryCoordinator(
                 new GameMetadata(null, null, null, null, null, null),
                 IsFavorite: false,
                 now,
-                now);
+                now,
+                ProfileId: _activeProfileId);
             var staged = _games.Append(item).ToArray();
             var save = await store.SaveAsync(
-                new GamesDocument(GamesDocument.CurrentSchemaVersion, staged),
+                CreateActiveDocument(staged),
                 cancellationToken).ConfigureAwait(false);
             if (save.Status != DocumentSaveStatus.Saved)
             {
@@ -707,7 +928,7 @@ public sealed class LibraryCoordinator(
                     save.Error);
             }
 
-            _games = staged;
+            PublishActive(staged);
             _revision++;
             return new LibraryMutationResult(
                 LibraryMutationStatus.Saved,
@@ -747,14 +968,14 @@ public sealed class LibraryCoordinator(
             }
 
             var save = await store.SaveAsync(
-                new GamesDocument(GamesDocument.CurrentSchemaVersion, staged),
+                CreateActiveDocument(staged),
                 cancellationToken).ConfigureAwait(false);
             if (save.Status != DocumentSaveStatus.Saved)
             {
                 return PersistenceFailure(save.Error);
             }
 
-            _games = staged.ToArray();
+            PublishActive(staged);
             _revision++;
             return Success(changed);
         }
@@ -772,17 +993,35 @@ public sealed class LibraryCoordinator(
         var staged = _games.ToArray();
         staged[index] = updated;
         var save = await store.SaveAsync(
-            new GamesDocument(GamesDocument.CurrentSchemaVersion, staged),
+            CreateActiveDocument(staged),
             cancellationToken).ConfigureAwait(false);
         if (save.Status != DocumentSaveStatus.Saved)
         {
             return PersistenceFailure(save.Error);
         }
 
-        _games = staged;
+        PublishActive(staged);
         _revision++;
         return Success(updated);
     }
+
+    private GamesDocument CreateActiveDocument(IEnumerable<LibraryItem> activeGames) =>
+        new(GamesDocument.CurrentSchemaVersion, ComposeAllGames(activeGames));
+
+    private LibraryItem[] ComposeAllGames(IEnumerable<LibraryItem> activeGames) =>
+        _allGames.Where(game => EffectiveProfileId(game) != _activeProfileId)
+            .Concat(activeGames.Select(game => game.ProfileId == _activeProfileId ? game : game with { ProfileId = _activeProfileId }))
+            .ToArray();
+
+    private void PublishActive(IEnumerable<LibraryItem> activeGames)
+    {
+        _games = activeGames.Select(game => game.ProfileId == _activeProfileId ? game : game with { ProfileId = _activeProfileId }).ToArray();
+        _allGames = _allGames.Where(game => EffectiveProfileId(game) != _activeProfileId).Concat(_games).ToArray();
+    }
+
+    private void RefreshActiveGames() => _games = _allGames.Where(game => EffectiveProfileId(game) == _activeProfileId).ToArray();
+
+    private static Guid EffectiveProfileId(LibraryItem game) => game.ProfileId ?? LocalProfileDefaults.DefaultProfileId;
 
     private int FindIndex(GameId id)
     {
@@ -892,7 +1131,7 @@ public sealed class LibraryCoordinator(
         !string.Equals(existing.SourceItemId, candidate.AppId.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) ||
         !string.Equals(existing.ImportedName, candidate.Name, StringComparison.Ordinal);
 
-    private static LibraryItem CreateSteamGame(SteamGameCandidate candidate, DateTimeOffset now) => new(
+    private static LibraryItem CreateSteamGame(SteamGameCandidate candidate, DateTimeOffset now, Guid profileId) => new(
         GameId.FromSteamAppId(candidate.AppId),
         candidate.Name,
         "Windows",
@@ -907,7 +1146,8 @@ public sealed class LibraryCoordinator(
         now,
         now,
         candidate.AppId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        candidate.Name);
+        candidate.Name,
+        ProfileId: profileId);
 
     private static LibraryMutationResult ValidationFailure(DraftValidationResult validation) =>
         new(LibraryMutationStatus.ValidationFailed, null, validation.Errors, null);
