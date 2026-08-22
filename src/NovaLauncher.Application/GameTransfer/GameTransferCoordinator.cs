@@ -11,7 +11,7 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
 {
     public const int MaximumFiles = 50_000;
     public const long MaximumFileBytes = 16L * 1024 * 1024 * 1024;
-    public const long MaximumPackageBytes = 256L * 1024 * 1024 * 1024;
+    public const long MaximumPackageBytes = 700L * 1024 * 1024 * 1024;
     public const int ChunkBytes = 1024 * 1024;
     public const long MaximumBytesPerSecond = 64L * 1024 * 1024;
     public const int MaximumOffers = 16;
@@ -58,7 +58,7 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
                 var relative = NormalizeRelativePath(Path.GetRelativePath(root, path));
                 if (!IsSafeRelativePath(relative) || info.Length > MaximumFileBytes) return Reject(game.Name, root, $"Unsafe or oversized package file: {relative}.");
                 total = checked(total + info.Length);
-                if (total > MaximumPackageBytes) return Reject(game.Name, root, "The package exceeds the aggregate size limit.");
+                if (!IsPackageSizeWithinLimit(total)) return Reject(game.Name, root, "The package exceeds the 700 GiB aggregate size limit.");
                 var beforeLength = info.Length;
                 var beforeWrite = info.LastWriteTimeUtc;
                 var hash = await HashFileAsync(path, cancellationToken).ConfigureAwait(false);
@@ -202,6 +202,7 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
     }
 
     private bool IsActivePeer(Guid id) => saveSync.Settings.EffectiveTrustedPeers.Any(peer => peer.DeviceId == id && peer.State == TrustedPeerState.Active);
+    public static bool IsPackageSizeWithinLimit(long totalBytes) => totalBytes is >= 0 and <= MaximumPackageBytes;
     private static bool ManifestFilesEqual(IReadOnlyList<GameTransferFile> left, IReadOnlyList<GameTransferFile> right) => left.Count == right.Count && left.Zip(right).All(pair => pair.First == pair.Second);
     private static GameTransferPreview Reject(string name, string source, string error) => new(false, name, source, [], [], 0, error);
     private static bool IsManagedStoreRoot(string path) { var value = path.Replace('/', '\\'); return value.Contains("\\steamapps\\", StringComparison.OrdinalIgnoreCase) || value.EndsWith("\\steamapps", StringComparison.OrdinalIgnoreCase) || value.Contains("\\Epic Games\\", StringComparison.OrdinalIgnoreCase) || value.Contains("\\XboxGames\\", StringComparison.OrdinalIgnoreCase) || value.Contains("\\WindowsApps\\", StringComparison.OrdinalIgnoreCase); }
@@ -245,7 +246,7 @@ public sealed class GameTransferCoordinator(IPeerGameTransferTransport transport
     private static bool ValidateManifest(GameTransferManifest manifest, Guid sender, out string? error)
     {
         error = null;
-        if (manifest.OfferId == Guid.Empty || manifest.GameId.Value == Guid.Empty || manifest.SenderDeviceId != sender || manifest.PackageName.Length is < 1 or > 200 || manifest.Files.Count is <= 0 or > MaximumFiles || manifest.TotalBytes is < 0 or > MaximumPackageBytes) { error = "The peer transfer manifest is invalid."; return false; }
+        if (manifest.OfferId == Guid.Empty || manifest.GameId.Value == Guid.Empty || manifest.SenderDeviceId != sender || manifest.PackageName.Length is < 1 or > 200 || manifest.Files.Count is <= 0 or > MaximumFiles || !IsPackageSizeWithinLimit(manifest.TotalBytes)) { error = "The peer transfer manifest is invalid."; return false; }
         long total = 0; var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var file in manifest.Files) { if (!IsSafeRelativePath(file.RelativePath) || !paths.Add(file.RelativePath) || file.Length is < 0 or > MaximumFileBytes || file.Sha256.Length != 64 || !file.Sha256.All(Uri.IsHexDigit)) { error = "The peer transfer manifest contains an unsafe file."; return false; } total = checked(total + file.Length); }
         if (total != manifest.TotalBytes) { error = "The peer transfer manifest size is inconsistent."; return false; }

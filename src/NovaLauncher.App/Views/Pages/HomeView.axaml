@@ -1,0 +1,108 @@
+<views:NovaPage
+    x:Class="NovaLauncher.App.Views.Pages.HomeView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:NovaLauncher.App.Views"
+    xmlns:components="using:NovaLauncher.App.Views.Components"
+    xmlns:domain="using:NovaLauncher.Domain.Library"
+    xmlns:vm="using:NovaLauncher.Application"
+    x:DataType="vm:MainWindowViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="36,28,36,42" Spacing="24">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+        <StackPanel Spacing="4">
+          <TextBlock Text="Home" Classes="page-title" />
+          <TextBlock Text="Pick up where you left off." Classes="page-subtitle" />
+        </StackPanel>
+        <Button Grid.Column="1" Content="View full library  →" Click="OnShowLibrary" Classes="quiet" VerticalAlignment="Center" AutomationProperties.Name="Browse complete game library" />
+      </Grid>
+
+      <Border Classes="hero" Height="380" IsVisible="{Binding Workspace.HasFeaturedGame}" ClipToBounds="True">
+        <ContentControl Content="{Binding Workspace.FeaturedGame}">
+          <ContentControl.ContentTemplate>
+            <DataTemplate x:DataType="domain:LibraryItem">
+        <Grid>
+          <Border Background="{DynamicResource ThemeElevated}">
+            <components:ManagedArtworkImage ArtworkKind="Hero" DecodeWidth="1400" Stretch="UniformToFill" Opacity="0.78" AutomationProperties.Name="Featured game hero artwork" />
+          </Border>
+          <Border Background="{DynamicResource ThemeHeroScrim}" />
+          <Grid Margin="38" RowDefinitions="*,Auto" MaxWidth="760" HorizontalAlignment="Left">
+            <StackPanel Grid.Row="1" Spacing="10">
+              <TextBlock Text="CONTINUE PLAYING" Classes="eyebrow" />
+              <TextBlock Text="{Binding Name}" FontSize="42" FontWeight="Bold" TextWrapping="Wrap" MaxLines="2" />
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Border Classes="pill"><TextBlock Text="{Binding Platform}" /></Border>
+                <Border Classes="pill"><TextBlock Text="{Binding Source}" /></Border>
+                <TextBlock Text="{Binding TotalPlayTime, StringFormat='{}{0:g} played'}" Foreground="{DynamicResource ThemeMuted}" VerticalAlignment="Center" />
+              </StackPanel>
+              <WrapPanel ItemSpacing="10" Margin="0,8,0,0">
+                <Button Classes="primary hero-action" Content="▶  Play now" Click="OnLaunchHomeGame" AutomationProperties.Name="Launch featured game" />
+                <Button Classes="glass hero-action" Content="View details" Click="OnOpenGameDetails" AutomationProperties.Name="Open featured game details" />
+              </WrapPanel>
+            </StackPanel>
+          </Grid>
+        </Grid>
+            </DataTemplate>
+          </ContentControl.ContentTemplate>
+        </ContentControl>
+      </Border>
+
+      <Grid ColumnDefinitions="*,*,*" ColumnSpacing="14">
+        <Border Classes="metric-card"><StackPanel Spacing="4"><TextBlock Text="LIBRARY" Classes="eyebrow" /><TextBlock Text="{Binding Workspace.LibraryGameCount}" Classes="metric" /><TextBlock Text="games available" Classes="caption" /></StackPanel></Border>
+        <Border Grid.Column="1" Classes="metric-card"><StackPanel Spacing="4"><TextBlock Text="FAVORITES" Classes="eyebrow" /><TextBlock Text="{Binding Workspace.FavoriteGameCount}" Classes="metric" /><TextBlock Text="ready to launch" Classes="caption" /></StackPanel></Border>
+        <Border Grid.Column="2" Classes="metric-card"><StackPanel Spacing="4"><TextBlock Text="PLAYTIME" Classes="eyebrow" /><TextBlock Text="{Binding Workspace.TotalLibraryPlayTime}" Classes="metric" /><TextBlock Text="monitored locally" Classes="caption" /></StackPanel></Border>
+      </Grid>
+
+      <TextBlock Text="Your games" Classes="section-title" />
+      <ItemsControl ItemsSource="{Binding Workspace.HomeGames}" AutomationProperties.Name="Home game highlights">
+        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="domain:LibraryItem">
+            <Button Classes="game-tile" Width="210" Height="300" Margin="0,0,16,16" Padding="0" Click="OnOpenGameDetails" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Open highlighted game details">
+              <Grid RowDefinitions="230,*">
+                <Border Background="{DynamicResource ThemeElevated}" CornerRadius="14,14,0,0" ClipToBounds="True">
+                  <Grid>
+                    <TextBlock Text="{Binding Name}" FontWeight="Bold" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="18" />
+                    <components:ManagedArtworkImage DecodeWidth="420" Stretch="UniformToFill" AutomationProperties.Name="Highlighted game cover artwork" />
+                    <Border Background="{DynamicResource ThemeCardScrim}" VerticalAlignment="Bottom" Height="48" />
+                  </Grid>
+                </Border>
+                <StackPanel Grid.Row="1" Margin="14,9" Spacing="2">
+                  <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Platform}" Classes="caption" />
+                </StackPanel>
+              </Grid>
+            </Button>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="20">
+        <Border Classes="card" IsVisible="{Binding Workspace.HasContinuePlayingGames}">
+          <StackPanel Spacing="12">
+            <TextBlock Text="Recently played" Classes="section-title" />
+            <ItemsControl ItemsSource="{Binding Workspace.ContinuePlayingGames}" AutomationProperties.Name="Recently played games">
+              <ItemsControl.ItemTemplate><DataTemplate x:DataType="domain:LibraryItem"><Button Classes="row-action" Content="{Binding Name}" Margin="0,0,0,6" Click="OnOpenGameDetails" HorizontalContentAlignment="Left" AutomationProperties.Name="Open recently played game details" /></DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="1" Classes="card" IsVisible="{Binding Workspace.HasMostPlayedGames}">
+          <StackPanel Spacing="12">
+            <TextBlock Text="Most played" Classes="section-title" />
+            <ItemsControl ItemsSource="{Binding Workspace.MostPlayedGames}" AutomationProperties.Name="Most played games">
+              <ItemsControl.ItemTemplate><DataTemplate x:DataType="domain:LibraryItem"><Button Classes="row-action" Content="{Binding Name}" Margin="0,0,0,6" Click="OnOpenGameDetails" HorizontalContentAlignment="Left" AutomationProperties.Name="Open most played game details" /></DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <Border Classes="empty-state" IsVisible="{Binding Workspace.IsEmpty}">
+        <StackPanel HorizontalAlignment="Center" Spacing="10">
+          <TextBlock Text="Your launcher is ready" FontSize="25" FontWeight="Bold" />
+          <TextBlock Text="Open Library to add an installed game or preview your Steam library." Classes="page-subtitle" TextAlignment="Center" />
+          <Button Content="Open Library" Classes="primary" Click="OnShowLibrary" HorizontalAlignment="Center" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</views:NovaPage>

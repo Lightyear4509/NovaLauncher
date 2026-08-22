@@ -146,11 +146,47 @@ public sealed class LibraryWorkspaceViewModel(
     public ObservableCollection<PeerGameTransferOffer> PeerGameTransferOffers { get; } = [];
     public ObservableCollection<GameTransferAuditItem> GameTransferHistory { get; } = [];
 
-    public string GameTransferSourceFolder { get => _gameTransferSourceFolder; set => Set(ref _gameTransferSourceFolder, value); }
+    public string GameTransferSourceFolder
+    {
+        get => _gameTransferSourceFolder;
+        set
+        {
+            if (!Set(ref _gameTransferSourceFolder, value)) return;
+            GameTransferPreview = null;
+            OnPropertyChanged(nameof(GameTransferAuthorizationHint));
+        }
+    }
     public string GameTransferDestination { get => _gameTransferDestination; set => Set(ref _gameTransferDestination, value); }
-    public bool GameTransferRightsAttested { get => _gameTransferRightsAttested; set => Set(ref _gameTransferRightsAttested, value); }
-    public GameTransferPreview? GameTransferPreview { get => _gameTransferPreview; private set { if (Set(ref _gameTransferPreview, value)) OnPropertyChanged(nameof(HasGameTransferPreview)); } }
+    public bool GameTransferRightsAttested
+    {
+        get => _gameTransferRightsAttested;
+        set
+        {
+            if (!Set(ref _gameTransferRightsAttested, value)) return;
+            OnPropertyChanged(nameof(CanAuthorizeGameTransfer));
+            OnPropertyChanged(nameof(GameTransferAuthorizationHint));
+        }
+    }
+    public GameTransferPreview? GameTransferPreview
+    {
+        get => _gameTransferPreview;
+        private set
+        {
+            if (!Set(ref _gameTransferPreview, value)) return;
+            OnPropertyChanged(nameof(HasGameTransferPreview));
+            OnPropertyChanged(nameof(CanAuthorizeGameTransfer));
+            OnPropertyChanged(nameof(GameTransferAuthorizationHint));
+        }
+    }
     public bool HasGameTransferPreview => GameTransferPreview?.Accepted == true;
+    public bool CanAuthorizeGameTransfer => HasGameTransferPreview && GameTransferRightsAttested && SelectedTrustedPeer?.State == TrustedPeerState.Active;
+    public string GameTransferAuthorizationHint => !HasGameTransferPreview
+        ? "Choose a folder to scan every regular file in it and its subfolders."
+        : SelectedTrustedPeer?.State != TrustedPeerState.Active
+            ? "Select one active trusted recipient."
+            : !GameTransferRightsAttested
+                ? "Confirm that you are authorized to copy this DRM-free folder."
+                : "Ready to authorize this reviewed folder for 24 hours.";
     public PeerGameTransferOffer? SelectedGameTransferOffer { get => _selectedGameTransferOffer; set => Set(ref _selectedGameTransferOffer, value); }
     public string GameTransferStatus { get => _gameTransferStatus; private set => Set(ref _gameTransferStatus, value); }
     public double GameTransferProgress { get => _gameTransferProgress; private set => Set(ref _gameTransferProgress, value); }
@@ -176,6 +212,8 @@ public sealed class LibraryWorkspaceViewModel(
             {
                 TrustedPeerName = value?.DisplayName ?? string.Empty;
                 OnPropertyChanged(nameof(HasSelectedTrustedPeer));
+                OnPropertyChanged(nameof(CanAuthorizeGameTransfer));
+                OnPropertyChanged(nameof(GameTransferAuthorizationHint));
             }
         }
     }
@@ -1322,6 +1360,13 @@ public sealed class LibraryWorkspaceViewModel(
         GameTransferStatus = GameTransferPreview.Accepted
             ? $"Preview ready: {GameTransferPreview.Files.Count:N0} files, {GameTransferPreview.TotalBytes:N0} bytes. Nothing is shared until authorization."
             : GameTransferPreview.Error ?? "The folder cannot be offered.";
+    }
+
+    public async Task SelectAndPreviewGameTransferSourceAsync(string sourceFolder, CancellationToken cancellationToken)
+    {
+        GameTransferSourceFolder = sourceFolder;
+        GameTransferStatus = "Scanning the selected folder and every subfolder…";
+        await PreviewSelectedGameTransferAsync(cancellationToken);
     }
 
     public async Task AuthorizeSelectedGameTransferAsync(CancellationToken cancellationToken)

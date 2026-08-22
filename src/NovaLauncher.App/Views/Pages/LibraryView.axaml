@@ -1,0 +1,97 @@
+<views:NovaPage
+    x:Class="NovaLauncher.App.Views.Pages.LibraryView"
+    x:Name="LibraryViewRoot"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:NovaLauncher.App.Views"
+    xmlns:components="using:NovaLauncher.App.Views.Components"
+    xmlns:domain="using:NovaLauncher.Domain.Library"
+    xmlns:library="using:NovaLauncher.Application.Library"
+    xmlns:steam="using:NovaLauncher.Application.Steam"
+    xmlns:vm="using:NovaLauncher.Application"
+    x:DataType="vm:MainWindowViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="36,28,36,42" Spacing="18">
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+        <StackPanel Spacing="4">
+          <TextBlock Text="Library" Classes="page-title" />
+          <TextBlock Text="{Binding Workspace.LibraryGameCount, StringFormat='{}{0} games on this device'}" Classes="page-subtitle" />
+        </StackPanel>
+        <Button Grid.Column="1" Classes="primary" Content="＋ Add game" Click="OnPickGameExecutable" AutomationProperties.Name="Choose an installed game executable" />
+        <Button Grid.Column="2" Content="Import Steam" Click="OnPreviewSteamImport" AutomationProperties.Name="Preview Steam library import" />
+      </Grid>
+
+      <Border Classes="card" Padding="14">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="2*,Auto" ColumnSpacing="10">
+            <TextBox Text="{Binding Workspace.SearchText}" PlaceholderText="Search games" AutomationProperties.Name="Search library" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+              <Button Content="▦" Click="OnUseLibraryGrid" ToolTip.Tip="Grid view" AutomationProperties.Name="Show library as grid" />
+              <Button Content="☷" Click="OnUseLibraryList" ToolTip.Tip="List view" AutomationProperties.Name="Show library as list" />
+              <ComboBox ItemsSource="{Binding Workspace.LibraryCardSizeOptions}" SelectedItem="{Binding Workspace.LibraryCardSize}" IsVisible="{Binding Workspace.IsGridLibraryView}" AutomationProperties.Name="Library card size" MinWidth="100" />
+            </StackPanel>
+          </Grid>
+          <WrapPanel ItemSpacing="8">
+            <ComboBox ItemsSource="{Binding Workspace.SourceFilterOptions}" SelectedItem="{Binding Workspace.SourceFilter}" AutomationProperties.Name="Filter library by source" MinWidth="120" />
+            <ComboBox ItemsSource="{Binding Workspace.PlatformFilterOptions}" SelectedItem="{Binding Workspace.PlatformFilter}" AutomationProperties.Name="Filter library by platform" MinWidth="120" />
+            <ComboBox ItemsSource="{Binding Workspace.AvailabilityFilterOptions}" SelectedItem="{Binding Workspace.AvailabilityFilter}" AutomationProperties.Name="Filter library by target availability" MinWidth="140" />
+            <ComboBox ItemsSource="{Binding Workspace.SortOptions}" SelectedItem="{Binding Workspace.SelectedSort}" AutomationProperties.Name="Library sort order" MinWidth="150" />
+            <ComboBox ItemsSource="{Binding Workspace.Collections}" SelectedItem="{Binding Workspace.LibraryCollectionFilter}" PlaceholderText="All collections" AutomationProperties.Name="Filter library by collection" MinWidth="140"><ComboBox.ItemTemplate><DataTemplate x:DataType="domain:GameCollection"><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+            <Button Content="Clear collection" Click="OnClearLibraryCollectionFilter" IsEnabled="{Binding Workspace.HasLibraryCollectionFilter}" AutomationProperties.Name="Clear library collection filter" />
+            <ComboBox ItemsSource="{Binding Workspace.SmartCollectionOptions}" SelectedItem="{Binding Workspace.SmartCollectionFilter}" AutomationProperties.Name="Filter library by smart collection" MinWidth="140" />
+            <Button Content="Clear smart" Click="OnClearSmartCollectionFilter" IsEnabled="{Binding Workspace.HasSmartCollectionFilter}" AutomationProperties.Name="Clear smart collection filter" />
+            <CheckBox Content="Favorites only" IsChecked="{Binding Workspace.FavoritesOnly}" AutomationProperties.Name="Show favorite games only" VerticalAlignment="Center" />
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="toast" IsVisible="{Binding Workspace.HasMissingTargets}" HorizontalAlignment="Stretch">
+        <TextBlock Text="{Binding Workspace.MissingTargetCount, StringFormat='{}{0} game target(s) are missing. Choose Missing target to review them.'}" TextWrapping="Wrap" AutomationProperties.Name="Missing game target warning" />
+      </Border>
+
+      <Border Classes="selection-bar" IsVisible="{Binding Workspace.HasLibraryMultiSelection}">
+        <WrapPanel ItemSpacing="8">
+          <TextBlock Text="{Binding Workspace.BulkSelectionSummary}" VerticalAlignment="Center" AutomationProperties.Name="Library selection count" />
+          <Button Content="Favorite selected" Click="OnFavoriteSelectedGames" AutomationProperties.Name="Mark selected games as favorites" />
+          <Button Content="Refresh selected" Click="OnRefreshSelectedGames" AutomationProperties.Name="Refresh metadata for selected games" />
+          <Button Content="Clear" Click="OnClearLibrarySelection" AutomationProperties.Name="Clear selected library games" />
+        </WrapPanel>
+      </Border>
+
+      <Border Classes="empty-state" IsVisible="{Binding Workspace.IsEmpty}" AutomationProperties.Name="Empty library message">
+        <StackPanel Spacing="12" HorizontalAlignment="Center">
+          <TextBlock Text="Build your library" FontSize="25" FontWeight="Bold" TextAlignment="Center" />
+          <TextBlock Text="Choose a Windows executable or preview Steam. NovaLauncher does not modify installed game files." Classes="page-subtitle" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="540" />
+          <WrapPanel ItemSpacing="8" HorizontalAlignment="Center"><Button Classes="primary" Content="Choose installed game" Click="OnPickGameExecutable" AutomationProperties.Name="Choose first installed game executable" /><Button Content="Preview Steam library" Click="OnPreviewSteamImport" AutomationProperties.Name="Preview Steam library from empty state" /></WrapPanel>
+        </StackPanel>
+      </Border>
+
+      <ItemsControl ItemsSource="{Binding Workspace.RenderedGames}" IsVisible="{Binding Workspace.IsGridLibraryView}" AutomationProperties.Name="Game card library">
+        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="domain:LibraryItem">
+            <Button Classes="game-tile" Width="{Binding #LibraryViewRoot.DataContext.Workspace.LibraryCardWidth}" Height="{Binding #LibraryViewRoot.DataContext.Workspace.LibraryCardHeight}" Margin="0,0,16,16" Padding="0" Click="OnOpenGameDetails" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Open game details">
+              <Button.ContextMenu><ContextMenu><MenuItem Header="Play" Click="OnContextPlay" /><MenuItem Header="Edit game" Click="OnContextEdit" /><Separator /><MenuItem Header="Add or remove from selection" Click="OnToggleLibraryGameSelection" /><MenuItem Header="Toggle favorite" Click="OnContextToggleFavorite" /><MenuItem Header="Refresh metadata" Click="OnContextRefreshMetadata" /></ContextMenu></Button.ContextMenu>
+              <Grid RowDefinitions="Auto,*">
+                <Border Height="{Binding #LibraryViewRoot.DataContext.Workspace.LibraryCoverHeight}" Background="{DynamicResource ThemeElevated}" CornerRadius="14,14,0,0" ClipToBounds="True"><Grid><TextBlock Text="{Binding Name}" TextWrapping="Wrap" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16" /><components:ManagedArtworkImage DecodeWidth="420" Stretch="UniformToFill" AutomationProperties.Name="Game cover artwork" /></Grid></Border>
+                <Grid Grid.Row="1" Margin="14,9" ColumnDefinitions="*,Auto"><StackPanel Spacing="2"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /><TextBlock Text="{Binding Platform}" Classes="caption" /></StackPanel><TextBlock Grid.Column="1" Text="{Binding Source}" Classes="eyebrow" VerticalAlignment="Bottom" /></Grid>
+              </Grid>
+            </Button>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <ItemsControl ItemsSource="{Binding Workspace.RenderedGames}" IsVisible="{Binding Workspace.IsListLibraryView}" AutomationProperties.Name="Game list library">
+        <ItemsControl.ItemTemplate><DataTemplate x:DataType="domain:LibraryItem"><Button Classes="game-card" HorizontalContentAlignment="Stretch" Margin="0,0,0,8" Click="OnOpenGameDetails" AutomationProperties.Name="Open listed game details"><Button.ContextMenu><ContextMenu><MenuItem Header="Play" Click="OnContextPlay" /><MenuItem Header="Edit game" Click="OnContextEdit" /><Separator /><MenuItem Header="Add or remove from selection" Click="OnToggleLibraryGameSelection" /><MenuItem Header="Toggle favorite" Click="OnContextToggleFavorite" /><MenuItem Header="Refresh metadata" Click="OnContextRefreshMetadata" /></ContextMenu></Button.ContextMenu><Grid ColumnDefinitions="64,2*,*,*,Auto" ColumnSpacing="14"><Border Width="54" Height="72" Background="{DynamicResource ThemeElevated}" CornerRadius="8" ClipToBounds="True"><components:ManagedArtworkImage DecodeWidth="180" Stretch="UniformToFill" AutomationProperties.Name="Listed game cover artwork" /></Border><StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /><TextBlock Text="{Binding Source}" Foreground="{DynamicResource ThemeAccent}" /></StackPanel><TextBlock Grid.Column="2" Text="{Binding Platform}" VerticalAlignment="Center" Classes="caption" /><TextBlock Grid.Column="3" Text="{Binding TotalPlayTime, StringFormat='{}{0:g} played'}" VerticalAlignment="Center" Classes="caption" /><TextBlock Grid.Column="4" Text="View  →" VerticalAlignment="Center" /></Grid></Button></DataTemplate></ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <Button Content="{Binding Workspace.LoadMoreLibraryGamesText}" Click="OnLoadMoreLibraryGames" IsVisible="{Binding Workspace.HasMoreLibraryGames}" HorizontalAlignment="Center" AutomationProperties.Name="Load more library games" />
+
+      <Border Classes="dialog" IsVisible="{Binding Workspace.IsEditorVisible}" MaxWidth="560" HorizontalAlignment="Right" AutomationProperties.Name="Add or edit game panel"><StackPanel Spacing="10"><TextBlock Text="{Binding Workspace.EditorTitle}" Classes="section-title" /><TextBox Text="{Binding Workspace.Name}" PlaceholderText="Game name" AutomationProperties.Name="Game name" /><TextBox Text="{Binding Workspace.Target}" PlaceholderText="Selected executable" IsReadOnly="True" AutomationProperties.Name="Game launch target" /><TextBox Text="{Binding Workspace.Platform}" PlaceholderText="Platform" AutomationProperties.Name="Game platform" /><Button Classes="primary" Content="Save game" Click="OnSaveGame" AutomationProperties.Name="Save manual game" /></StackPanel></Border>
+
+      <Border Classes="elevated-card" IsVisible="{Binding Workspace.HasDuplicateCandidates}" AutomationProperties.Name="Potential duplicate game review"><StackPanel Spacing="10"><TextBlock Text="Potential duplicates" Classes="section-title" /><TextBlock Text="Review both records, choose the survivor, then repeat the merge action to confirm. Installed files are never deleted." Classes="page-subtitle" TextWrapping="Wrap" /><TextBlock Text="Showing the first 100 candidate pairs. Refine filters before continuing." IsVisible="{Binding Workspace.DuplicateReviewTruncated}" Foreground="{DynamicResource ThemeAccent}" AutomationProperties.Name="Duplicate review result limit" /><ItemsControl ItemsSource="{Binding Workspace.DuplicateCandidates}" AutomationProperties.Name="Potential duplicate game pairs"><ItemsControl.ItemTemplate><DataTemplate x:DataType="library:DuplicateReviewItem"><Grid ColumnDefinitions="2*,2*,3*,Auto,Auto" ColumnSpacing="10" Margin="0,4"><TextBlock Text="{Binding Primary.Name}" /><TextBlock Grid.Column="1" Text="{Binding Candidate.Name}" /><TextBlock Grid.Column="2" Text="{Binding Reason}" Classes="caption" TextWrapping="Wrap" /><StackPanel Grid.Column="3"><Button Content="Review first" Tag="Primary" Click="OnReviewDuplicate" AutomationProperties.Name="Review first potential duplicate" /><Button Content="Keep first" Tag="Primary" Click="OnMergeDuplicate" AutomationProperties.Name="Keep first record and merge duplicate" /></StackPanel><StackPanel Grid.Column="4"><Button Content="Review second" Tag="Candidate" Click="OnReviewDuplicate" AutomationProperties.Name="Review second potential duplicate" /><Button Content="Keep second" Tag="Candidate" Click="OnMergeDuplicate" AutomationProperties.Name="Keep second record and merge duplicate" /></StackPanel></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+
+      <Border Classes="card" IsVisible="{Binding Workspace.HasSteamPreview}"><StackPanel Spacing="10"><TextBlock Text="Steam import preview" Classes="section-title" /><TextBlock Text="Review detected entries and individual failures. NovaLauncher never writes to Steam files." Classes="page-subtitle" TextWrapping="Wrap" /><ItemsControl ItemsSource="{Binding Workspace.SteamPreviewItems}" AutomationProperties.Name="Steam import preview"><ItemsControl.ItemTemplate><DataTemplate x:DataType="steam:SteamImportPreviewItem"><TextBlock Text="{Binding Name}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><ItemsControl ItemsSource="{Binding Workspace.SteamImportFailures}" AutomationProperties.Name="Skipped Steam manifests"><ItemsControl.ItemTemplate><DataTemplate x:DataType="steam:SteamImportFailure"><StackPanel Margin="0,4"><TextBlock Text="{Binding Path}" FontWeight="SemiBold" TextWrapping="Wrap" /><TextBlock Text="{Binding Reason}" Foreground="{DynamicResource ThemeAccent}" TextWrapping="Wrap" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><Button Classes="primary" Content="Import reviewed games" Click="OnCommitSteamImport" HorizontalAlignment="Left" AutomationProperties.Name="Import reviewed Steam preview" /></StackPanel></Border>
+    </StackPanel>
+  </ScrollViewer>
+</views:NovaPage>

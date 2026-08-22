@@ -1,0 +1,59 @@
+<views:NovaPage
+    x:Class="NovaLauncher.App.Views.Pages.TransfersView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:NovaLauncher.App.Views"
+    xmlns:transfers="using:NovaLauncher.Application.GameTransfer"
+    xmlns:syncDomain="using:NovaLauncher.Domain.SaveSync"
+    xmlns:vm="using:NovaLauncher.Application"
+    x:DataType="vm:MainWindowViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="36,28,36,44" Spacing="20" MaxWidth="940" HorizontalAlignment="Left">
+      <StackPanel Spacing="4"><TextBlock Text="Downloads &amp; Saves" Classes="page-title" /><TextBlock Text="Private transfers, save activity, and data safety." Classes="page-subtitle" /></StackPanel>
+
+      <Border Classes="elevated-card">
+        <StackPanel Spacing="10"><TextBlock Text="Current save transfer" Classes="section-title" /><ProgressBar IsIndeterminate="True" IsVisible="{Binding Workspace.IsSaveTransferActive}" Height="8" AutomationProperties.Name="Current save transfer progress" /><TextBlock Text="{Binding Workspace.ActiveSaveTransfer}" TextWrapping="Wrap" /></StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto"><StackPanel><TextBlock Text="Save activity" Classes="section-title" /><TextBlock Text="Encrypted snapshots and peer acknowledgements for mapped manual games." Classes="caption" /></StackPanel><WrapPanel Grid.Column="1" ItemSpacing="8"><Button Content="Retry queued uploads" Click="OnRetryPendingSaveUploads" AutomationProperties.Name="Retry queued save uploads to paired device" /><Button Content="Refresh" Click="OnRefreshSaveSyncActivity" AutomationProperties.Name="Refresh save transfer activity" /></WrapPanel></Grid>
+          <ItemsControl ItemsSource="{Binding Workspace.SaveSyncActivities}"><ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,0,0,1" Padding="0,10"><Grid ColumnDefinitions="2*,*,Auto" ColumnSpacing="12"><StackPanel><TextBlock Text="{Binding GameName}" FontWeight="SemiBold" /><TextBlock Text="{Binding SnapshotId}" Classes="caption" /></StackPanel><TextBlock Grid.Column="1" Text="{Binding Status}" VerticalAlignment="Center" /><TextBlock Grid.Column="2" Text="{Binding FileCount, StringFormat='{}{0} files'}" VerticalAlignment="Center" /></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="14">
+          <StackPanel Spacing="4"><TextBlock Text="Private game transfer" Classes="section-title" /><TextBlock Text="Experimental · manually added DRM-free folders you are authorized to copy. Steam and managed-store folders are refused; received code is never launched automatically." Classes="page-subtitle" TextWrapping="Wrap" /></StackPanel>
+          <Grid ColumnDefinitions="*,*" ColumnSpacing="18">
+            <StackPanel Spacing="10">
+              <TextBlock Text="SEND A FOLDER" Classes="eyebrow" />
+              <TextBox Text="{Binding Workspace.GameTransferSourceFolder}" PlaceholderText="Source game folder" AutomationProperties.Name="Authorized manual game source folder" />
+              <WrapPanel ItemSpacing="8"><Button Classes="primary" Content="Choose folder &amp; scan" Click="OnChooseGameTransferSource" AutomationProperties.Name="Choose and recursively scan manual game transfer source folder" /><Button Content="Rescan" Click="OnPreviewGameTransfer" AutomationProperties.Name="Rescan bounded game transfer manifest" /></WrapPanel>
+              <Border Classes="metric-card" IsVisible="{Binding Workspace.HasGameTransferPreview}"><Grid ColumnDefinitions="*,*"><StackPanel><TextBlock Text="FILES" Classes="eyebrow" /><TextBlock Text="{Binding Workspace.GameTransferPreview.Files.Count}" Classes="metric" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="TOTAL BYTES" Classes="eyebrow" /><TextBlock Text="{Binding Workspace.GameTransferPreview.TotalBytes, StringFormat='{}{0:N0}'}" FontSize="18" FontWeight="SemiBold" /></StackPanel></Grid></Border>
+              <ComboBox ItemsSource="{Binding Workspace.TrustedSaveSyncPeers}" SelectedItem="{Binding Workspace.SelectedTrustedPeer}" PlaceholderText="Choose one active trusted recipient" AutomationProperties.Name="Trusted game transfer recipient"><ComboBox.ItemTemplate><DataTemplate x:DataType="syncDomain:TrustedSaveSyncPeer"><TextBlock Text="{Binding DisplayName}" /></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+              <CheckBox Content="I confirm I am authorized to copy and transfer this DRM-free game folder" IsChecked="{Binding Workspace.GameTransferRightsAttested}" AutomationProperties.Name="Attest game copy rights" />
+              <TextBlock Text="{Binding Workspace.GameTransferAuthorizationHint}" Classes="caption" TextWrapping="Wrap" />
+              <Button Classes="primary" Content="Authorize 24-hour offer" Click="OnAuthorizeGameTransfer" IsEnabled="{Binding Workspace.CanAuthorizeGameTransfer}" HorizontalAlignment="Left" AutomationProperties.Name="Authorize reviewed game transfer to selected peer" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="10">
+              <TextBlock Text="RECEIVE A FOLDER" Classes="eyebrow" />
+              <Button Content="Refresh authorized offers" Click="OnRefreshGameTransferOffers" HorizontalAlignment="Left" AutomationProperties.Name="Refresh authorized peer game transfer offers" />
+              <ListBox ItemsSource="{Binding Workspace.PeerGameTransferOffers}" SelectedItem="{Binding Workspace.SelectedGameTransferOffer}" MinHeight="100" MaxHeight="210" AutomationProperties.Name="Authorized peer game transfer offers"><ListBox.ItemTemplate><DataTemplate x:DataType="transfers:PeerGameTransferOffer"><Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="4"><StackPanel><TextBlock Text="{Binding Manifest.PackageName}" FontWeight="SemiBold" /><TextBlock Text="{Binding Peer.DisplayName}" Classes="caption" /></StackPanel><TextBlock Grid.Column="1" Text="{Binding Manifest.TotalBytes, StringFormat='{}{0:N0} bytes'}" VerticalAlignment="Center" /></Grid></DataTemplate></ListBox.ItemTemplate></ListBox>
+              <TextBox Text="{Binding Workspace.GameTransferDestination}" PlaceholderText="Empty destination folder" AutomationProperties.Name="Game transfer destination folder" />
+              <WrapPanel ItemSpacing="8"><Button Content="Choose destination" Click="OnChooseGameTransferDestination" AutomationProperties.Name="Choose empty game transfer destination" /><Button Classes="primary" Content="Download or resume" Click="OnDownloadGameTransfer" AutomationProperties.Name="Download or resume verified peer game transfer" /><Button Content="Pause" Click="OnPauseGameTransfer" IsEnabled="{Binding Workspace.IsGameTransferActive}" AutomationProperties.Name="Pause active game transfer" /></WrapPanel>
+              <ProgressBar Minimum="0" Maximum="100" Value="{Binding Workspace.GameTransferProgress}" Height="8" AutomationProperties.Name="Peer game transfer byte progress" />
+              <TextBlock Text="{Binding Workspace.GameTransferStatus}" TextWrapping="Wrap" />
+            </StackPanel>
+          </Grid>
+          <Expander Header="Transfer history" Classes="panel-expander"><ItemsControl ItemsSource="{Binding Workspace.GameTransferHistory}" AutomationProperties.Name="Local peer game transfer audit history"><ItemsControl.ItemTemplate><DataTemplate x:DataType="transfers:GameTransferAuditItem"><TextBlock Text="{Binding Outcome}" Margin="0,4" TextWrapping="Wrap" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
+        </StackPanel>
+      </Border>
+
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="18">
+        <Border Classes="card"><StackPanel Spacing="10"><TextBlock Text="Local NovaLauncher backup" Classes="section-title" /><TextBlock Text="Export or validate library, collections, settings, and manual overrides. Secrets and disposable caches are excluded." Classes="caption" TextWrapping="Wrap" /><TextBox Text="{Binding Workspace.BackupPath}" PlaceholderText="C:\Backups\NovaLauncher.zip" AutomationProperties.Name="Saves page backup archive path" /><WrapPanel ItemSpacing="8"><Button Content="Export backup" Click="OnExport" AutomationProperties.Name="Export local NovaLauncher backup from Saves page" /><Button Content="{Binding Workspace.RestoreButtonText}" Click="OnRestore" AutomationProperties.Name="Restore local NovaLauncher backup from Saves page" /></WrapPanel></StackPanel></Border>
+        <Border Grid.Column="1" Classes="card"><StackPanel Spacing="10"><TextBlock Text="Cross-device save linking" Classes="section-title" /><TextBlock Text="Configure trusted Tailscale devices in Settings, then map each eligible manual game from its details page. Conflicts block launch instead of overwriting either side." Classes="caption" TextWrapping="Wrap" /><Button Content="Configure trusted devices  →" Click="OnShowSettings" HorizontalAlignment="Left" AutomationProperties.Name="Configure cross-device save linking" /></StackPanel></Border>
+      </Grid>
+    </StackPanel>
+  </ScrollViewer>
+</views:NovaPage>

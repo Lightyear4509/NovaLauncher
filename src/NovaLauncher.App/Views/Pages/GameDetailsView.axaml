@@ -1,0 +1,110 @@
+<views:NovaPage
+    x:Class="NovaLauncher.App.Views.Pages.GameDetailsView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:NovaLauncher.App.Views"
+    xmlns:components="using:NovaLauncher.App.Views.Components"
+    xmlns:enrichment="using:NovaLauncher.Application.Enrichment"
+    xmlns:saves="using:NovaLauncher.Application.SaveSync"
+    xmlns:achievements="using:NovaLauncher.Domain.Achievements"
+    xmlns:vm="using:NovaLauncher.Application"
+    x:DataType="vm:MainWindowViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="36,24,36,44" Spacing="20">
+      <Button Content="←  Library" Classes="quiet" Click="OnShowLibrary" HorizontalAlignment="Left" AutomationProperties.Name="Back to Library" />
+
+      <Border Classes="hero" Height="360" DataContext="{Binding Workspace.SelectedGame}" ClipToBounds="True">
+        <Grid>
+          <components:ManagedArtworkImage ArtworkKind="Hero" DecodeWidth="1400" Stretch="UniformToFill" AutomationProperties.Name="Selected game artwork" />
+          <Border Background="{DynamicResource ThemeHeroScrim}" />
+          <Grid Margin="34" RowDefinitions="*,Auto" MaxWidth="820" HorizontalAlignment="Left">
+            <StackPanel Grid.Row="1" Spacing="10">
+              <TextBlock Text="GAME DETAILS" Classes="eyebrow" />
+              <TextBlock Text="{Binding Name}" FontSize="42" FontWeight="Bold" TextWrapping="Wrap" MaxLines="2" />
+              <StackPanel Orientation="Horizontal" Spacing="10"><Border Classes="pill"><TextBlock Text="{Binding Platform}" /></Border><Border Classes="pill"><TextBlock Text="{Binding Source}" /></Border></StackPanel>
+              <WrapPanel ItemSpacing="10" Margin="0,8,0,0">
+                <Button Classes="primary hero-action" Content="▶  Play" Click="OnLaunch" AutomationProperties.Name="Launch selected game" />
+                <Button Classes="glass" Content="☆  Favorite" Click="OnToggleFavorite" AutomationProperties.Name="Toggle selected game favorite" />
+                <Button Classes="glass" Content="Edit" Click="OnEditSelectedGame" AutomationProperties.Name="Edit selected game" />
+              </WrapPanel>
+            </StackPanel>
+          </Grid>
+        </Grid>
+      </Border>
+
+      <Grid ColumnDefinitions="2*,*" ColumnSpacing="22">
+        <StackPanel Spacing="16">
+          <Border Classes="card">
+            <StackPanel Spacing="10">
+              <TextBlock Text="About" Classes="section-title" />
+              <TextBlock Text="{Binding Workspace.SelectedGameDescription}" TextWrapping="Wrap" FontSize="15" LineHeight="23" />
+              <WrapPanel ItemSpacing="8">
+                <Button Content="Refresh metadata" Click="OnRefreshMetadata" AutomationProperties.Name="Refresh selected game metadata and artwork" />
+                <Button Content="Locate executable" Click="OnLocateSelectedGame" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Locate replacement executable for selected manual game" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+
+          <Expander Header="Artwork &amp; presentation" IsExpanded="False" Classes="panel-expander">
+            <StackPanel Spacing="10" Margin="4,12,4,4">
+              <WrapPanel ItemSpacing="8">
+                <ComboBox ItemsSource="{Binding Workspace.ArtworkKindOptions}" SelectedItem="{Binding Workspace.SelectedArtworkKind}" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Custom artwork type" MinWidth="130" />
+                <Button Content="Add artwork" Click="OnAddManualCover" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Choose custom artwork for manual game" />
+                <Button Content="Remove artwork" Click="OnRemoveManualCover" IsEnabled="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Remove selected custom artwork from manual game" />
+                <Button Content="Provider variants" Click="OnPreviewArtworkVariants" IsEnabled="{Binding Workspace.CanBrowseProviderArtwork}" AutomationProperties.Name="Review provider artwork variants" />
+                <Button Content="Inspect cache" Click="OnInspectArtworkCache" AutomationProperties.Name="Inspect managed artwork cache" />
+                <Button Content="Clean orphan art" Click="OnCleanupArtworkCache" AutomationProperties.Name="Remove unreferenced managed artwork cache files" />
+              </WrapPanel>
+              <Border Classes="card" IsVisible="{Binding Workspace.HasArtworkVariants}" AutomationProperties.Name="Provider artwork variant review"><StackPanel Spacing="8"><TextBlock Text="Provider artwork variants" FontWeight="SemiBold" /><TextBlock Text="Each choice is downloaded through the existing bounded validator." Classes="caption" TextWrapping="Wrap" /><ItemsControl ItemsSource="{Binding Workspace.ArtworkVariants}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="enrichment:ArtworkCandidate"><Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" Margin="0,3"><StackPanel><TextBlock Text="{Binding ProviderId}" FontWeight="SemiBold" /><TextBlock Text="{Binding Kind}" Classes="caption" /></StackPanel><Button Grid.Column="1" Content="Use variant" Click="OnApplyArtworkVariant" AutomationProperties.Name="Apply this provider artwork variant" /></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+              <Border Classes="card" IsVisible="{Binding Workspace.CanChangeManualCover}" AutomationProperties.Name="Artwork crop and reposition controls"><StackPanel Spacing="8"><TextBlock Text="Crop and reposition" FontWeight="SemiBold" /><TextBlock Text="Percentages are validated before a managed preview replaces the current presentation." Classes="caption" TextWrapping="Wrap" /><Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="8"><StackPanel><TextBlock Text="Left %" /><NumericUpDown Value="{Binding Workspace.ArtworkCropX}" Minimum="0" Maximum="99" AutomationProperties.Name="Artwork crop left percent" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="Top %" /><NumericUpDown Value="{Binding Workspace.ArtworkCropY}" Minimum="0" Maximum="99" AutomationProperties.Name="Artwork crop top percent" /></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Width %" /><NumericUpDown Value="{Binding Workspace.ArtworkCropWidth}" Minimum="1" Maximum="100" AutomationProperties.Name="Artwork crop width percent" /></StackPanel><StackPanel Grid.Column="3"><TextBlock Text="Height %" /><NumericUpDown Value="{Binding Workspace.ArtworkCropHeight}" Minimum="1" Maximum="100" AutomationProperties.Name="Artwork crop height percent" /></StackPanel></Grid><Button Content="Apply crop and preview" Click="OnCropSelectedArtwork" HorizontalAlignment="Left" AutomationProperties.Name="Apply artwork crop and update preview" /></StackPanel></Border>
+            </StackPanel>
+          </Expander>
+
+          <Expander Header="Identity &amp; metadata" IsExpanded="False" Classes="panel-expander" IsVisible="{Binding Workspace.CanMatchManualGame}" AutomationProperties.Name="Manual game identity matching">
+            <StackPanel Spacing="12" Margin="4,12,4,4">
+              <TextBlock Text="{Binding Workspace.LinkedIdentitySummary}" TextWrapping="Wrap" />
+              <TextBox Text="{Binding Workspace.IdentitySearchText}" MaxLength="200" PlaceholderText="Search title" AutomationProperties.Name="Manual game identity search title" />
+              <WrapPanel ItemSpacing="8"><Button Content="Find matches" Click="OnSearchGameIdentity" AutomationProperties.Name="Search for manual game identity candidates" /><Button Content="No match" Click="OnRejectGameIdentityMatches" IsEnabled="{Binding Workspace.HasIdentityCandidates}" AutomationProperties.Name="Reject all game identity candidates" /><Button Content="Unlink" Click="OnUnlinkGameIdentity" IsEnabled="{Binding Workspace.HasLinkedIdentity}" AutomationProperties.Name="Unlink confirmed game identity" /></WrapPanel>
+              <TextBlock Text="Candidates are review-only. Search never changes the executable or downloads art." Classes="caption" TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding Workspace.IdentityCandidates}" AutomationProperties.Name="Manual game identity candidates"><ItemsControl.ItemTemplate><DataTemplate x:DataType="enrichment:GameIdentityCandidate"><Border Classes="card" Margin="0,3"><Grid ColumnDefinitions="*,Auto" ColumnSpacing="12"><StackPanel><TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextWrapping="Wrap" /><TextBlock Text="{Binding ProviderId}" Foreground="{DynamicResource ThemeAccent}" /><TextBlock Text="{Binding MatchReason}" Classes="caption" TextWrapping="Wrap" /></StackPanel><Button Grid.Column="1" Content="Confirm match" Click="OnConfirmGameIdentity" AutomationProperties.Name="Confirm this game identity candidate" /></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+              <ItemsControl ItemsSource="{Binding Workspace.IdentitySearchFailures}" AutomationProperties.Name="Game identity search warnings"><ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{DynamicResource ThemeAccent}" TextWrapping="Wrap" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+              <TextBlock Text="Your protected details" FontWeight="SemiBold" Margin="0,8,0,0" />
+              <TextBox Text="{Binding Workspace.ManualDescription}" MaxLength="10000" AcceptsReturn="True" MinHeight="90" TextWrapping="Wrap" PlaceholderText="Description" AutomationProperties.Name="Manual game description" />
+              <TextBox Text="{Binding Workspace.ManualGenres}" PlaceholderText="Genres, separated by commas" AutomationProperties.Name="Manual game genres" />
+              <TextBox Text="{Binding Workspace.ManualDevelopers}" PlaceholderText="Developers, separated by commas" AutomationProperties.Name="Manual game developers" />
+              <TextBox Text="{Binding Workspace.ManualPublishers}" PlaceholderText="Publishers, separated by commas" AutomationProperties.Name="Manual game publishers" />
+              <TextBox Text="{Binding Workspace.ManualReleaseDate}" PlaceholderText="Release date: YYYY-MM-DD" AutomationProperties.Name="Manual game release date" />
+              <WrapPanel ItemSpacing="8"><Button Content="Save my details" Click="OnSaveManualMetadata" AutomationProperties.Name="Save protected manual game metadata" /><Button Content="Restore provider values" Click="OnRestoreProviderMetadata" IsEnabled="{Binding Workspace.HasLinkedIdentity}" AutomationProperties.Name="Remove manual metadata protection and refresh provider values" /></WrapPanel>
+            </StackPanel>
+          </Expander>
+
+          <Expander Header="Cross-device saves" IsExpanded="False" Classes="panel-expander">
+            <StackPanel Spacing="10" Margin="4,12,4,4">
+              <TextBlock Text="{Binding Workspace.SelectedSaveDirectory}" TextWrapping="Wrap" />
+              <TextBlock Text="Manual games only. Steam titles continue to use Steam Cloud." Classes="caption" TextWrapping="Wrap" />
+              <TextBlock Text="Shared save identity" FontWeight="SemiBold" /><TextBlock Text="{Binding Workspace.SelectedSaveSyncIdentity}" TextWrapping="Wrap" />
+              <TextBox Text="{Binding Workspace.SaveSyncLabel}" PlaceholderText="Same game label on both devices" AutomationProperties.Name="Automatic shared save label" />
+              <Button Content="Link automatically with paired device" Click="OnLinkSaveAutomatically" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" HorizontalAlignment="Left" AutomationProperties.Name="Derive shared save identity from paired credential" />
+              <TextBox Text="{Binding Workspace.SaveSyncLinkCode}" PlaceholderText="Advanced recovery identity" AutomationProperties.Name="Shared game save identity" />
+              <WrapPanel ItemSpacing="8"><Button Content="Create link" Click="OnGenerateSaveSyncLink" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Create shared save identity for selected game" /><Button Content="Copy link" Click="OnCopySaveSyncLink" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Copy shared save identity" /><Button Content="Paste link" Click="OnPasteSaveSyncLink" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Paste shared save identity" /><Button Content="Apply link" Click="OnApplySaveSyncLink" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Apply shared save identity to selected game" /></WrapPanel>
+              <WrapPanel ItemSpacing="8"><Button Content="Choose save folder" Click="OnChooseSaveFolder" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Choose manual game save folder" /><Button Content="Remove mapping" Click="OnClearSaveFolder" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Remove manual game save folder mapping" /><Button Content="Sync now" Click="OnSyncSelectedGameNow" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Upload selected game saves now" /></WrapPanel>
+              <Border Classes="warning-notice" IsVisible="{Binding Workspace.ShowInitialSaveUploadPrompt}" AutomationProperties.Name="Existing save upload confirmation"><StackPanel Spacing="8"><TextBlock Text="Existing files were found. Confirm this is the correct game's save folder before uploading." TextWrapping="Wrap" /><WrapPanel ItemSpacing="8"><Button Content="Upload existing saves" Click="OnSyncSelectedGameNow" AutomationProperties.Name="Confirm upload of existing save files" /><Button Content="Not now" Click="OnDismissInitialSaveUpload" AutomationProperties.Name="Decline upload of existing save files" /></WrapPanel></StackPanel></Border>
+              <TextBlock Text="Conflict recovery" FontWeight="SemiBold" /><WrapPanel ItemSpacing="8"><Button Content="Keep local" Click="OnKeepLocalSave" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Resolve save conflict by keeping local files" /><Button Content="Use remote" Click="OnKeepRemoteSave" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Resolve save conflict by restoring remote files" /><Button Content="Keep both" Click="OnKeepBothSaves" IsEnabled="{Binding Workspace.CanConfigureSaveFolder}" AutomationProperties.Name="Resolve save conflict by retaining both versions" /></WrapPanel>
+              <TextBlock Text="Snapshot history" FontWeight="SemiBold" /><ListBox ItemsSource="{Binding Workspace.SaveSnapshotHistory}" SelectedItem="{Binding Workspace.SelectedSaveSnapshot}" MaxHeight="220" AutomationProperties.Name="Retained save snapshot history"><ListBox.ItemTemplate><DataTemplate x:DataType="saves:SaveSnapshotHistoryItem"><Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="0,4"><StackPanel><TextBlock Text="{Binding CreatedAtUtc, StringFormat='{}{0:g}'}" FontWeight="SemiBold" /><TextBlock Text="{Binding SnapshotId}" Classes="caption" /><TextBlock Text="{Binding Error}" IsVisible="{Binding !IntegrityValid}" Foreground="{DynamicResource ThemeDanger}" TextWrapping="Wrap" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="{Binding FileCount, StringFormat='{}{0} files'}" /><TextBlock Text="{Binding IntegrityValid, StringFormat='Integrity: {0}'}" /></StackPanel></Grid></DataTemplate></ListBox.ItemTemplate></ListBox>
+              <WrapPanel ItemSpacing="8"><Button Content="Refresh history" Click="OnRefreshSnapshotHistory" AutomationProperties.Name="Refresh selected game save snapshot history" /><Button Content="Restore selected snapshot" Click="OnRestoreSelectedSnapshot" IsEnabled="{Binding Workspace.CanRestoreSelectedSnapshot}" AutomationProperties.Name="Restore selected verified save snapshot" /></WrapPanel>
+              <ItemsControl ItemsSource="{Binding Workspace.SaveRestoreHistory}" AutomationProperties.Name="Bounded save restore history"><ItemsControl.ItemTemplate><DataTemplate x:DataType="saves:SaveRestoreHistoryItem"><Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10" Margin="4"><TextBlock Text="{Binding CreatedAtUtc, StringFormat='{}{0:g}'}" /><TextBlock Grid.Column="1" Text="{Binding Outcome}" /><TextBlock Grid.Column="2" Text="{Binding BackedUpFileCount, StringFormat='{}{0} files'}" /></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+            </StackPanel>
+          </Expander>
+
+          <Border Classes="card"><StackPanel Spacing="10"><TextBlock Text="Achievements" Classes="section-title" /><TextBlock Text="{Binding Workspace.AchievementSummary}" Classes="page-subtitle" TextWrapping="Wrap" /><Button Content="Refresh achievements" Click="OnRefreshAchievements" HorizontalAlignment="Left" /><ItemsControl ItemsSource="{Binding Workspace.Achievements}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="achievements:Achievement"><Grid ColumnDefinitions="*,Auto" Margin="0,4"><StackPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding Description}" Classes="caption" TextWrapping="Wrap" /></StackPanel><TextBlock Grid.Column="1" Text="{Binding IsUnlocked, StringFormat='Unlocked: {0}'}" /></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+        </StackPanel>
+
+        <StackPanel Grid.Column="1" Spacing="16">
+          <Border Classes="elevated-card"><StackPanel Spacing="11"><TextBlock Text="Game information" Classes="section-title" /><TextBlock Text="Developer" Classes="eyebrow" /><TextBlock Text="{Binding Workspace.SelectedGameDevelopers}" TextWrapping="Wrap" /><TextBlock Text="Publisher" Classes="eyebrow" /><TextBlock Text="{Binding Workspace.SelectedGamePublishers}" TextWrapping="Wrap" /><TextBlock Text="Released" Classes="eyebrow" /><TextBlock Text="{Binding Workspace.SelectedGameReleaseDate}" /><TextBlock Text="Playtime" Classes="eyebrow" /><TextBlock Text="{Binding Workspace.SelectedGamePlayTime}" FontSize="22" FontWeight="SemiBold" /></StackPanel></Border>
+          <Border Classes="card"><StackPanel Spacing="10"><TextBlock Text="Launch options" Classes="section-title" /><CheckBox Content="Run this game as administrator" IsChecked="{Binding Workspace.RunSelectedAsAdministrator}" IsEnabled="{Binding Workspace.CanRunAsAdministrator}" AutomationProperties.Name="Request administrator permission for this game" /><TextBlock Text="Windows will show UAC. NovaLauncher never bypasses approval." Classes="caption" TextWrapping="Wrap" /></StackPanel></Border>
+          <Border Classes="danger-zone"><StackPanel Spacing="9"><TextBlock Text="Remove from library" FontWeight="SemiBold" /><TextBlock Text="This removes only the NovaLauncher entry. Installed files remain untouched." Classes="caption" TextWrapping="Wrap" /><Button Content="{Binding Workspace.RemoveButtonText}" Click="OnRemove" AutomationProperties.Name="Remove selected game from NovaLauncher" /></StackPanel></Border>
+        </StackPanel>
+      </Grid>
+    </StackPanel>
+  </ScrollViewer>
+</views:NovaPage>

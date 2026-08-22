@@ -41,6 +41,8 @@ public sealed class AvaloniaThemeHost : IThemeHost
         resources["ThemeButton"] = Brush.Parse(palette.Button);
         resources["ThemeButtonHover"] = Brush.Parse(palette.ButtonHover);
         resources["ThemeButtonPressed"] = Brush.Parse(palette.ButtonPressed);
+        resources["ThemeHeroScrim"] = Brush.Parse(palette.Overlay);
+        resources["ThemeCardScrim"] = Brush.Parse(palette.Overlay);
         CurrentThemeId = themeId;
         return true;
     }

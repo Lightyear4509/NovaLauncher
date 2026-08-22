@@ -42,6 +42,33 @@ public sealed class GameTransferCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task PreviewIncludesExecutableAndEveryRegularFileInSubfolders()
+    {
+        var source = await CreateSourceAsync();
+        var nested = Path.Combine(source, "content", "levels");
+        Directory.CreateDirectory(nested);
+        await File.WriteAllTextAsync(Path.Combine(nested, "level-01.dat"), "level");
+        using var service = CreateService(out _, out _);
+
+        var preview = await service.PreviewAsync(Game("Manual", Path.Combine(source, "game.exe")), source, CancellationToken.None);
+
+        Assert.True(preview.Accepted, preview.Error);
+        Assert.Equal(3, preview.Files.Count);
+        Assert.Contains(preview.Files, file => file.RelativePath == "game.exe");
+        Assert.Contains(preview.Files, file => file.RelativePath == "data.bin");
+        Assert.Contains(preview.Files, file => file.RelativePath == "content/levels/level-01.dat");
+    }
+
+    [Theory]
+    [InlineData(500L * 1024 * 1024 * 1024, true)]
+    [InlineData(700L * 1024 * 1024 * 1024, true)]
+    [InlineData(700L * 1024 * 1024 * 1024 + 1, false)]
+    public void PackageLimitSupportsAtLeast500GiBAndRejectsOver700GiB(long bytes, bool expected)
+    {
+        Assert.Equal(expected, GameTransferCoordinator.IsPackageSizeWithinLimit(bytes));
+    }
+
+    [Fact]
     public async Task ChunkServingRejectsMutationAndTraversal()
     {
         var source = await CreateSourceAsync();
